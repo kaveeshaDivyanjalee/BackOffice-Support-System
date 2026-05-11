@@ -431,8 +431,8 @@ function App() {
       const cleanedWorkflow = [];
 
       const cleanStepText = (step) => {
-        // Removes ANY quotes, braces, brackets, and trims whitespace
-        return step.replace(/[\]}"'\[{]/g, "").trim();
+        // Removes ANY quotes, braces, brackets, replaces underscores with spaces, and trims whitespace
+        return step.replace(/[\]}"'\[{]/g, "").replace(/_/g, " ").trim();
       };
 
       for (const step of workflow) {
@@ -503,7 +503,12 @@ function App() {
       }
 
       // If the field WAS sent (even if its value is 'UNKNOWN', null, or empty), show the prefix
-      return <div className="value-row"><span className="value-prefix">{prefix}</span> <span className={statusColor(val)}>{val}</span></div>;
+      return (
+        <div className="value-row">
+          <span className="value-prefix">{prefix.replace(/_/g, " ")}</span> 
+          <span className={`value-text ${statusColor(val)}`}>{val.replace(/_/g, " ")}</span>
+        </div>
+      );
     };
 
     return (
@@ -512,14 +517,14 @@ function App() {
           <h4>Dynamic Data</h4>
 
           <div className="tech-group">
-            <h5>LDAP</h5>
+            <h5>LDAP Details</h5>
             <div className="tech-item"><span className="label">Package details:</span><span className="value">{formatValue("LDAP_Package", ["LDAP_Package", "Package"])}</span></div>
             <div className="tech-item"><span className="label">Account Status:</span><span className="value">{formatValue("Account_Status", ["Account_Status", "LDAP_Status", "ldap_status"])}</span></div>
             <div className="tech-item"><span className="label">Online Status:</span><span className="value">{formatValue("Online_Status", ["Online_Status", "online_status"])}</span></div>
           </div>
 
           <div className="tech-group">
-            <h5>VAS</h5>
+            <h5>VAS & Addons</h5>
             <div className="tech-item"><span className="label">Package details:</span><span className="value">{formatValue("VAS_Package", ["VAS_Package"])}</span></div>
             <div className="tech-item"><span className="label">Status:</span><span className="value">{formatValue("VAS_Status", ["VAS_Status"])}</span></div>
             <div className="tech-item"><span className="label">Extra GB:</span><span className="value">{formatValue("Extra_GB", ["Extra_GB"])}</span></div>
@@ -527,19 +532,19 @@ function App() {
           </div>
 
           <div className="tech-group">
-            <h5>NMS</h5>
+            <h5>NMS Network</h5>
             <div className="tech-item"><span className="label">Line status:</span><span className="value">{formatValue("NMS_service_port_status", ["NMS_service_port_status", "nms_service_port_status"])}</span></div>
             <div className="tech-item multi-row"><span className="label">Line conditions:</span><span className="value">{formatValue("RX_Power_Level", ["RX_Power_Level", "rx_power"])}{formatValue("TX_Power_Level", ["TX_Power_Level", "tx_power"])}{formatValue("PON_Status", ["PON_Status", "pon_status"])}</span></div>
           </div>
 
           <div className="tech-group">
-            <h5>IPTV</h5>
+            <h5>IPTV / PEOTV</h5>
             <div className="tech-item multi-row"><span className="label">Package:</span><span className="value">{formatValue("PEOTV_1_Status", ["PEOTV_1_Status"])}{formatValue("PEOTV_2_Status", ["PEOTV_2_Status"])}{formatValue("PEOTV_3_Status", ["PEOTV_3_Status"])}{formatValue("Service_status_IPTV", ["Service_status_IPTV"])}</span></div>
             <div className="tech-item"><span className="label">MAC:</span><span className="value">{formatValue("STB_MAC", ["STB_MAC", "stb_mac"])}</span></div>
           </div>
 
           <div className="tech-group">
-            <h5>Billing details</h5>
+            <h5>Billing & Payments</h5>
             <div className="tech-item"><span className="label">Status:</span><span className="value">{formatValue("Billing_Status", ["Billing_Status", "billing_status"])}</span></div>
             <div className="tech-item"><span className="label">Total bill:</span><span className="value">{formatValue("Total_bill", ["Total_bill", "total_bill"])}</span></div>
             <div className="tech-item"><span className="label">Last month’s bill:</span><span className="value">{formatValue("Last_month_bill", ["Last_month_bill", "last_month_bill"])}</span></div>
@@ -547,26 +552,58 @@ function App() {
         </div>
 
         <div className="tech-column">
-          <h4>Static data</h4>
+          <h4>Static Data</h4>
 
           <div className="tech-group">
-            <h5>Customer details</h5>
+            <h5>Customer Info</h5>
             <div className="tech-item"><span className="label">Name:</span><span className="value">{formatValue("Customer_Name", ["Customer_Name", "customer_name", "Name", "name"])}</span></div>
             <div className="tech-item"><span className="label">Contact number:</span><span className="value">{formatValue("Contact_Number", ["Contact_Number", "contact_number", "Contact", "contact"])}</span></div>
           </div>
 
           <div className="tech-group">
-            <h5>Fault history</h5>
+            <h5>Fault History</h5>
             <div className="tech-item multi-row"><span className="label">Recent fault:</span><span className="value">{formatValue("Existing_faults_BB", ["Existing_faults_BB"])}{formatValue("Existing_faults_Voice", ["Existing_faults_Voice"])}{formatValue("Existing_faults_IPTV", ["Existing_faults_IPTV"])}{formatValue("NW_faults", ["NW_faults"])}</span></div>
             <div className="tech-item"><span className="label">Faults per month:</span><span className="value">{formatValue("Faults_per_month", ["Faults_per_month"])}</span></div>
           </div>
 
           <div className="tech-group">
-            <h5>Equipment details</h5>
+            <h5>Equipment Details</h5>
             <div className="tech-item multi-row"><span className="label">Brand and model:</span><span className="value">{formatValue("ONT_Model", ["ONT_Model", "ont_model"])}{formatValue("ONT_Type", ["ONT_Type", "ont_type"])}</span></div>
             <div className="tech-item"><span className="label">Serial number:</span><span className="value">{formatValue("ONT_Serial_No", ["ONT_Serial_No", "ont_serial_no", "serial", "Serial"])}</span></div>
           </div>
         </div>
+      </div>
+    );
+  };
+
+  const renderMessageContent = (content) => {
+    if (!content) return null;
+
+    // Check if this is a final summary message
+    const isSummary = content.includes("analysis complete") || content.includes("💡");
+
+    // Split by the " , " separator if present to handle multi-part summaries
+    // Using a regex to handle optional whitespace and newlines around the comma
+    const sections = content.split(/\s*,\s*/).map(s => s.trim()).filter(Boolean);
+
+    return (
+      <div className={isSummary ? "summary-container" : ""}>
+        {sections.map((section, idx) => {
+          // Highlight Subscriber IDs (e.g., ACC060859917)
+          const subIdRegex = /(ACC\d+)/g;
+          const parts = section.split(subIdRegex);
+
+          return (
+            <div key={idx} className="message-line">
+              {parts.map((part, i) => {
+                if (subIdRegex.test(part)) {
+                  return <strong key={i} className="sub-id-highlight">{part}</strong>;
+                }
+                return part;
+              })}
+            </div>
+          );
+        })}
       </div>
     );
   };
@@ -578,6 +615,7 @@ function App() {
       {/* ── Sidebar ───────────────────────────────────────────────────── */}
       <div className="sidebar">
         <div className="logo">SLTMobitel Support</div>
+
         <h2>Agent Selector</h2>
 
         {agents.map((agent, index) => (
@@ -604,7 +642,9 @@ function App() {
                 key={index}
                 className={msg.role === "assistant" ? "message assistant" : "message user"}
               >
-                <div className="message-content">{msg.content}</div>
+                <div className="message-content">
+                  {renderMessageContent(msg.content)}
+                </div>
 
                 {/* Workflow Execution — shown inside the chat bubble */}
                 {msg.workflow && msg.workflow.length > 0 && (
