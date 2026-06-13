@@ -27,7 +27,7 @@ def read_root():
 # N8N webhook URL - make it configurable via environment or use test mode
 N8N_WEBHOOK_URL = os.getenv(
     "N8N_WEBHOOK_URL",
-    "https://sltrnddigitallab.app.n8n.cloud/webhook/39030de0-436a-485b-9f6b-21f81f6e5f8a"
+    "https://sltrnddigitallab.app.n8n.cloud/webhook/bddee54a-4c52-4c92-9e1f-f552b48e8e2e"
 )
 USE_TEST_MODE = os.getenv("USE_TEST_MODE", "false").lower() == "true"
 
@@ -35,6 +35,30 @@ class SupportQuery(BaseModel):
     agent: str
     subscriber_id: str
     query: str
+
+class EmailChatRequest(BaseModel):
+    message: str
+    user_id: str = "020601"
+    thread_id: str = "default_thread"
+
+@app.post("/email-chat")
+def handle_email_chat(request: EmailChatRequest):
+    try:
+        print(f"Email agent request: {request.model_dump()}")
+        url = "https://aiagents.sltdigitallab.lk/api/v1/chat"
+        payload = {
+            "message": request.message,
+            "agent_id": "backoffice_email",
+            "user_id": request.user_id,
+            "thread_id": request.thread_id
+        }
+        response = requests.post(url, json=payload, timeout=60)
+        response.raise_for_status()
+        print(f"Email agent response: {response.text}")
+        return {"reply": response.text}
+    except Exception as e:
+        print(f"Email agent error: {str(e)}")
+        return {"error": str(e)}
 
 @app.post("/support-query")
 def handle_support(query: SupportQuery):

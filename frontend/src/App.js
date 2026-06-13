@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from "react";
+import React, { useState, useRef, useCallback, useEffect } from "react";
 import "./App.css";
 
 // ─── YAML-style text parser ────────────────────────────────────────────────
@@ -172,6 +172,38 @@ function flattenObj(obj, prefix = "") {
   return rows;
 }
 
+// ─── Format Object into a user-friendly string ──────────────────────────
+function formatObjectFriendly(key, obj) {
+  if (obj === null || obj === undefined) return "N/A";
+  if (Array.isArray(obj)) {
+    if (obj.length === 0) return "Empty List";
+    return obj.map(item => typeof item === "object" ? JSON.stringify(item) : String(item)).join(", ");
+  }
+
+  // Check for empty object
+  if (Object.keys(obj).length === 0) return "None";
+
+  // Check for standard limit/used summaries (like myPackageSummary, vasDataSummary, etc.)
+  if (typeof obj.limit === "number" && typeof obj.used === "number") {
+    const unit = obj.volumeUnit || "GB";
+    return `Limit: ${obj.limit} ${unit} | Used: ${obj.used} ${unit}`;
+  }
+
+  // Special handling for myPackageInfo
+  if (key === "myPackageInfo") {
+    const name = obj.packageName || "N/A";
+    const details = obj.usageDetails && obj.usageDetails.length > 0
+      ? ` (${obj.usageDetails.length} usage profiles)`
+      : "";
+    return `${name}${details}`;
+  }
+
+  // Fallback: pretty print key-value pairs of the object
+  return Object.entries(obj)
+    .map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : v}`)
+    .join(" | ");
+}
+
 // ─── Status badge colour ──────────────────────────────────────────────────
 function statusColor(val) {
   if (!val) return "";
@@ -179,8 +211,8 @@ function statusColor(val) {
 
   // Check red conditions first to prevent "inactive" triggering "active"
   if (["inactive", "offline", "failed", "error", "fault", "throttled"].some((k) => v.includes(k))) return "badge-red";
-  if (["active", "online", "healthy", "passed", "ok"].some((k) => v.includes(k))) return "badge-green";
-  if (["unknown", "n/a"].some((k) => v.includes(k))) return "badge-grey";
+  if (["active", "online", "healthy", "passed", "ok", "normal"].some((k) => v.includes(k))) return "badge-green";
+  if (["unknown", "n/a", "none"].some((k) => v.includes(k))) return "badge-grey";
   return "badge-blue";
 }
 
@@ -188,10 +220,53 @@ function statusColor(val) {
 function App() {
   const [selectedAgent, setSelectedAgent] = useState("");
   const [subscriberId, setSubscriberId] = useState("");
-  const [chatMessages, setChatMessages] = useState([]);
+  const [allAgentMessages, setAllAgentMessages] = useState({}); // per-agent chat history
   const [loading, setLoading] = useState(false);
   const [apiData, setApiData] = useState(null);      // raw HTTP node data
   const [devOutput, setDevOutput] = useState(null);      // parsed developer_output
+
+  const messagesEndRef = useRef(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  // Derived: messages for the currently selected agent
+  const chatMessages = allAgentMessages[selectedAgent] || [];
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [chatMessages, loading]);
+
+  // Helper to append messages to the active agent's history
+  const appendMessage = (agent, msg) => {
+    setAllAgentMessages(prev => ({
+      ...prev,
+      [agent]: [...(prev[agent] || []), msg],
+    }));
+  };
+
+  // Switch agent: clear input, preserve each agent's history
+  const handleSelectAgent = (agent) => {
+    setSelectedAgent(agent);
+    setSubscriberId("");
+
+    const agentMessages = allAgentMessages[agent] || [];
+    let lastApiData = null;
+    let lastDevOutput = null;
+
+    for (let i = agentMessages.length - 1; i >= 0; i--) {
+      const msg = agentMessages[i];
+      if (msg.role === "assistant" && (msg.apiDataRaw || msg.devOutputRaw)) {
+        lastApiData = msg.apiDataRaw || null;
+        lastDevOutput = msg.devOutputRaw || null;
+        break;
+      }
+    }
+
+    setApiData(lastApiData);
+    setDevOutput(lastDevOutput);
+  };
 
   // ── Resizer State ────────────────────────────────────────────────────────
   const [techPanelWidth, setTechPanelWidth] = useState(500);
@@ -226,53 +301,123 @@ function App() {
   const buildTechRows = (api, dev) => {
     const rows = [];
 
-    // Section 1 — API Data (raw from HTTP Request node)
+    // Section 1 — API Data: fully flatten all nested objects into individual rows
     if (api && typeof api === "object") {
       for (const [k, v] of Object.entries(api)) {
-        rows.push({ key: k, value: v === null || v === undefined ? "N/A" : String(v) });
-      }
-    }
-
-    // Section 2 — Developer Output fields (flat, no workflow_execution)
-    if (dev && typeof dev === "object") {
-      for (const [k, v] of Object.entries(dev)) {
-        if (k === "workflow_execution") continue;
         if (v === null || v === undefined) {
           rows.push({ key: k, value: "N/A" });
+        } else if (typeof v === "object" && !Array.isArray(v)) {
+          // Empty object → single "None" row
+          if (Object.keys(v).length === 0) {
+            rows.push({ key: k, value: "None" });
+          } else {
+            // Non-empty object → expand each sub-field as its own row with indent marker
+            rows.push({ key: k, value: null, isSection: true }); // section header
+            for (const [sk, sv] of Object.entries(v)) {
+              if (Array.isArray(sv)) {
+                // Array items (e.g. usageDetails) — each element on own row
+                sv.forEach((item, idx) => {
+                  if (typeof item === "object") {
+                    rows.push({ key: sk, value: null, isSection: true, isSubSection: true });
+                    for (const [ik, iv] of Object.entries(item)) {
+                      rows.push({ key: ik, value: String(iv ?? "N/A"), isIndented: true, isDoubleIndented: true });
+                    }
+                  } else {
+                    rows.push({ key: sk, value: String(item ?? "N/A"), isIndented: true });
+                  }
+                });
+              } else if (typeof sv === "object" && sv !== null) {
+                rows.push({ key: `  ${sk}`, value: formatObjectFriendly(sk, sv), isIndented: true });
+              } else {
+                rows.push({ key: `  ${sk}`, value: String(sv ?? "N/A"), isIndented: true });
+              }
+            }
+          }
         } else if (Array.isArray(v)) {
           rows.push({ key: k, value: v.join(", ") });
-        } else if (typeof v === "object") {
-          flattenObj(v, k).forEach((r) => rows.push(r));
         } else {
           rows.push({ key: k, value: String(v) });
         }
       }
     }
 
+    // Section 2 — Developer Output fields (flat, no workflow_execution)
+    // Removed per user request
+
     return rows;
   };
 
   const agents = [
-    "Free Chat",
+    "Main Agent",
     "Usage Agent",
-    "Protocol Agent",
-    "Monthly Data Allocation Agent",
     "Email Solution Agent",
     "Configuration Agent",
   ];
 
   // ── Submit ────────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
-    if (!selectedAgent || !subscriberId) {
-      alert("Please select an agent and enter a Subscriber ID");
+    if (!selectedAgent) {
+      alert("Please select an agent first");
+      return;
+    }
+
+    if (selectedAgent === "Email Solution Agent") {
+      if (!subscriberId.trim()) {
+        alert("Please enter a message for the Email Agent");
+        return;
+      }
+
+      const userMsg = subscriberId;
+      setSubscriberId("");
+
+      // Instantly show the user's message bubble
+      appendMessage(selectedAgent, { role: "user", content: userMsg });
+
+      // Clear old technical details while loading
+      setApiData(null);
+      setDevOutput(null);
+      setLoading(true);
+
+      try {
+        const response = await fetch("http://localhost:8000/email-chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: userMsg,
+            user_id: "020601",
+            thread_id: "default_thread",
+          }),
+        });
+
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+        const data = await response.json();
+        if (data.error) throw new Error(data.error);
+
+        appendMessage(selectedAgent, { role: "assistant", content: data.reply, isEmailAgent: true });
+      } catch (error) {
+        console.error("Error:", error);
+        appendMessage(selectedAgent, { role: "assistant", content: `Error: ${error.message}`, isEmailAgent: true });
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
+    if (!subscriberId) {
+      alert("Please enter a Subscriber ID");
+      return;
+    }
+
+    if (subscriberId.trim() !== "94113627500") {
+      appendMessage(selectedAgent, { role: "user", content: `Subscriber ID: ${subscriberId}` });
+      appendMessage(selectedAgent, { role: "assistant", content: "Subscriber ID is not found .Please Enter valid subscriber ID" });
+      setSubscriberId("");
       return;
     }
 
     // Instantly show the user's message bubble, appending to previous chats
-    setChatMessages((prev) => [
-      ...prev,
-      { role: "user", content: `Subscriber ID: ${subscriberId}` },
-    ]);
+    appendMessage(selectedAgent, { role: "user", content: `Subscriber ID: ${subscriberId}` });
 
     // Clear old technical details while loading
     setApiData(null);
@@ -455,18 +600,19 @@ function App() {
 
       const messageTechDetails = buildTechRows(rawApiData, parsedDev);
 
-      setChatMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: chatMessage, workflow: cleanedWorkflow, techDetails: messageTechDetails },
-      ]);
+      appendMessage(selectedAgent, {
+        role: "assistant",
+        content: chatMessage,
+        workflow: cleanedWorkflow,
+        techDetails: messageTechDetails,
+        apiDataRaw: rawApiData,
+        devOutputRaw: parsedDev
+      });
 
       setSubscriberId("");
     } catch (error) {
       console.error("Error:", error);
-      setChatMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: `Error: ${error.message}`, workflow: [] },
-      ]);
+      appendMessage(selectedAgent, { role: "assistant", content: `Error: ${error.message}`, workflow: [] });
     }
 
     setLoading(false);
@@ -478,35 +624,125 @@ function App() {
   const renderTechDashboard = () => {
     const formatValue = (prefix, keys) => {
       let isPresent = false;
-      let val = "UNKNOWN";
+      let val = "UNKNOWN"; // Default to UNKNOWN if not found or empty
+
+      const resolvePath = (obj, path) => {
+        if (!obj) return undefined;
+        const parts = path.split('.');
+        let current = obj;
+        for (const part of parts) {
+          if (current === null || current === undefined) return undefined;
+          current = current[part];
+        }
+        return current;
+      };
 
       for (const key of keys) {
-        if (apiData && Object.prototype.hasOwnProperty.call(apiData, key)) {
+        let apiVal = resolvePath(apiData, key);
+        let devVal = resolvePath(devOutput, key);
+
+        if (apiVal !== undefined && apiVal !== null && String(apiVal).trim() !== "") {
           isPresent = true;
-          if (apiData[key] !== null && apiData[key] !== undefined && String(apiData[key]).trim() !== "") {
-            val = String(apiData[key]);
-          }
+          val = typeof apiVal === "object"
+            ? formatObjectFriendly(key.split('.').pop(), apiVal)
+            : String(apiVal);
           break;
         }
-        if (devOutput && Object.prototype.hasOwnProperty.call(devOutput, key)) {
+
+        if (devVal !== undefined && devVal !== null && String(devVal).trim() !== "") {
           isPresent = true;
-          if (devOutput[key] !== null && devOutput[key] !== undefined && String(devOutput[key]).trim() !== "") {
-            val = String(devOutput[key]);
-          }
+          val = typeof devVal === "object"
+            ? formatObjectFriendly(key.split('.').pop(), devVal)
+            : String(devVal);
           break;
         }
       }
 
-      // If the field wasn't sent in the payload at all, hide the prefix and just show UNKNOWN
       if (!isPresent) {
-        return <div className="value-row"><span className="badge-grey">UNKNOWN</span></div>;
+        return (
+          <div className="value-row">
+            {prefix && <span className="value-prefix">{prefix.replace(/_/g, " ")}</span>}
+            <span className="badge-grey">UNKNOWN</span>
+          </div>
+        );
       }
 
-      // If the field WAS sent (even if its value is 'UNKNOWN', null, or empty), show the prefix
       return (
         <div className="value-row">
-          <span className="value-prefix">{prefix.replace(/_/g, " ")}</span>
+          {prefix && <span className="value-prefix">{prefix.replace(/_/g, " ")}</span>}
           <span className={`value-text ${statusColor(val)}`}>{val.replace(/_/g, " ")}</span>
+        </div>
+      );
+    };
+
+    const renderRawObject = (prefix, keys) => {
+      let isPresent = false;
+      let objVal = null;
+      const resolvePath = (obj, path) => {
+        if (!obj) return undefined;
+        const parts = path.split('.');
+        let current = obj;
+        for (const part of parts) {
+          if (current === null || current === undefined) return undefined;
+          current = current[part];
+        }
+        return current;
+      };
+
+      for (const key of keys) {
+        let val = resolvePath(apiData, key) || resolvePath(devOutput, key);
+        if (val !== undefined && val !== null) {
+          isPresent = true;
+          objVal = val;
+          break;
+        }
+      }
+
+      if (!isPresent) {
+        return (
+          <div className="value-row">
+            {prefix && <span className="value-prefix">{prefix.replace(/_/g, " ")}</span>}
+            <span className="badge-grey">UNKNOWN</span>
+          </div>
+        );
+      }
+
+      const renderNode = (node, depth = 0) => {
+        if (node === null || node === undefined) return <span style={{ color: '#94a3b8' }}>N/A</span>;
+        if (typeof node !== 'object') return <span style={{ color: '#0f172a', fontWeight: '500' }}>{String(node)}</span>;
+
+        if (Array.isArray(node)) {
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px', width: '100%' }}>
+              {node.map((item, idx) => (
+                <div key={idx} style={{ paddingLeft: '12px', borderLeft: '2px solid #cbd5e1', width: '100%' }}>
+                  {renderNode(item, depth + 1)}
+                </div>
+              ))}
+            </div>
+          );
+        }
+
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: depth === 0 ? '0' : '4px', width: '100%' }}>
+            {Object.entries(node).map(([k, v], idx) => (
+              <div key={idx} style={{ display: 'flex', flexDirection: 'row', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
+                <span style={{ fontSize: '12px', color: '#475569', fontWeight: '600', minWidth: '100px', wordBreak: 'break-word' }}>{k}</span>
+                <div style={{ flex: 1, fontSize: '13px', wordBreak: 'break-word' }}>
+                  {renderNode(v, depth + 1)}
+                </div>
+              </div>
+            ))}
+          </div>
+        );
+      };
+
+      return (
+        <div className="value-row" style={{ flexDirection: 'column', alignItems: 'flex-start', padding: '10px 12px', width: '100%' }}>
+          {prefix && <span className="value-prefix" style={{ marginBottom: '8px', borderBottom: '1px solid #e2e8f0', paddingBottom: '4px', width: '100%' }}>{prefix.replace(/_/g, " ")}</span>}
+          <div style={{ width: '100%' }}>
+            {renderNode(objVal)}
+          </div>
         </div>
       );
     };
@@ -525,10 +761,13 @@ function App() {
 
           <div className="tech-group">
             <h5>VAS</h5>
-            <div className="tech-item"><span className="label">Package details:</span><span className="value">{formatValue("VAS_Package", ["VAS_Package"])}</span></div>
-            <div className="tech-item"><span className="label">Status:</span><span className="value">{formatValue("VAS_Status", ["VAS_Status"])}</span></div>
-            <div className="tech-item"><span className="label">Extra GB:</span><span className="value">{formatValue("Extra_GB", ["Extra_GB"])}</span></div>
-            <div className="tech-item"><span className="label">Addons:</span><span className="value">{formatValue("Addons", ["Addons", "VAS_Addons"])}</span></div>
+            <div className="tech-item multi-row" style={{ width: '100%' }}><span className="label">Package details:</span><span className="value" style={{ width: '100%', gap: '12px' }}>
+              {renderRawObject("Info", ["dashboardSummaryResponse.myPackageInfo", "myPackageInfo"])}
+              {renderRawObject("Summary", ["dashboardSummaryResponse.myPackageSummary", "myPackageSummary"])}
+            </span></div>
+            <div className="tech-item"><span className="label">Status:</span><span className="value">{formatValue("", ["dashboardSummaryResponse.status", "status"])}</span></div>
+            <div className="tech-item"><span className="label">Extra GB:</span><span className="value">{formatValue("", ["dashboardSummaryResponse.extraGbDataSummary", "extraGbDataSummary"])}</span></div>
+            <div className="tech-item"><span className="label">Addons:</span><span className="value">{formatValue("", ["dashboardSummaryResponse.addons", "addons"])}</span></div>
           </div>
 
           <div className="tech-group">
@@ -556,8 +795,8 @@ function App() {
 
           <div className="tech-group">
             <h5>Customer Details</h5>
-            <div className="tech-item"><span className="label">Name:</span><span className="value">{formatValue("Customer_Name", ["Customer_Name", "customer_name", "Name", "name"])}</span></div>
-            <div className="tech-item"><span className="label">Contact number:</span><span className="value">{formatValue("Contact_Number", ["Contact_Number", "contact_number", "Contact", "contact"])}</span></div>
+            <div className="tech-item"><span className="label">Name:</span><span className="value">{formatValue("", ["dashboardSummaryResponse.name", "name"])}</span></div>
+            <div className="tech-item"><span className="label">Contact number:</span><span className="value">{formatValue("", ["dashboardSummaryResponse.phone", "phone"])}</span></div>
           </div>
 
           <div className="tech-group">
@@ -576,23 +815,43 @@ function App() {
     );
   };
 
-  const renderMessageContent = (content) => {
-    if (!content) return null;
+  const formatMarkdownToHTML = (text) => {
+    let html = text;
+    // Replace bold syntax **text** with <strong>text</strong>
+    html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    // Replace link syntax [text](url) with a clickable link <a href="url">text</a>
+    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    return html;
+  };
+
+  const renderMessageContent = (msg) => {
+    if (!msg || !msg.content) return null;
+    const content = msg.content;
+
+    if (msg.isEmailAgent) {
+      return (
+        <div className="email-agent-response">
+          {content.split("\n").map((line, i) => (
+            <div 
+              key={i} 
+              className="message-line" 
+              dangerouslySetInnerHTML={{ __html: formatMarkdownToHTML(line) }}
+            />
+          ))}
+        </div>
+      );
+    }
 
     // Check if this is a final summary message
     const isSummary = content.includes("analysis complete") || content.includes("💡");
 
-    // Split by the " , " separator if present to handle multi-part summaries
-    // Using a regex to handle optional whitespace and newlines around the comma
     const sections = content.split(/\s*,\s*/).map(s => s.trim()).filter(Boolean);
 
     return (
       <div className={isSummary ? "summary-container" : ""}>
         {sections.map((section, idx) => {
-          // Highlight Subscriber IDs (e.g., ACC060859917)
           const subIdRegex = /(ACC\d+)/g;
           const parts = section.split(subIdRegex);
-
           return (
             <div key={idx} className="message-line">
               {parts.map((part, i) => {
@@ -608,9 +867,22 @@ function App() {
     );
   };
 
-  // ─────────────────────────────────────────────────────────────────────────
+  const isEmailAgentSelected = selectedAgent === "Email Solution Agent";
+  const NON_IMPLEMENTED = ["Main Agent", "Usage Agent"];
+  const isNonImplemented = NON_IMPLEMENTED.includes(selectedAgent);
+
+  // Show Tech Panel only when it's not email, not non-implemented, and user entered subscriber ID (data is loaded or loading)
+  const showTechPanel = !isEmailAgentSelected && !isNonImplemented && (apiData !== null || devOutput !== null || loading);
+
   return (
-    <div className="container" style={{ gridTemplateColumns: `240px 1fr 6px ${techPanelWidth}px` }}>
+    <div
+      className="container"
+      style={{
+        gridTemplateColumns: showTechPanel
+          ? `240px 1fr 6px ${techPanelWidth}px`
+          : "240px 1fr",
+      }}
+    >
 
       {/* ── Sidebar ───────────────────────────────────────────────────── */}
       <div className="sidebar">
@@ -622,7 +894,7 @@ function App() {
           <div
             key={index}
             className={`agent-card ${selectedAgent === agent ? "selected" : ""}`}
-            onClick={() => setSelectedAgent(agent)}
+            onClick={() => handleSelectAgent(agent)}
           >
             {agent}
           </div>
@@ -631,97 +903,235 @@ function App() {
 
       {/* ── Chat Section ──────────────────────────────────────────────── */}
       <div className="chat-section">
-        <div className="chat-header">Technical Support Assistant</div>
-
-        <div className="chat-box">
-          {chatMessages.map((msg, index) => {
-            const isLatestMessageAndAssistant = index === chatMessages.length - 1 && msg.role === "assistant";
-
-            return (
-              <div
-                key={index}
-                className={msg.role === "assistant" ? "message assistant" : "message user"}
-              >
-                <div className="message-content">
-                  {renderMessageContent(msg.content)}
-                </div>
-
-                {/* Workflow Execution — shown inside the chat bubble */}
-                {msg.workflow && msg.workflow.length > 0 && (
-                  <div className="workflow-section">
-                    <strong>⚙ Workflow Execution:</strong>
-                    <ul>
-                      {msg.workflow.map((step, i) => (
-                        <li key={i}>{step}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
-                {/* In-chat Technical Details Toggle */}
-                {msg.techDetails && msg.techDetails.length > 0 && !isLatestMessageAndAssistant && (
-                  <details className="chat-tech-details">
-                    <summary>View Technical Details</summary>
-                    <div className="tech-data">
-                      {msg.techDetails.map(({ key, value }, i) => (
-                        <div key={i} className="tech-row">
-                          <span className="tech-key">{key}</span>
-                          <span className={`tech-value ${statusColor(value)}`}>{value}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </details>
-                )}
+        {!selectedAgent ? (
+          <div className="welcome-hero-container">
+            <div className="welcome-hero-card">
+              <div className="welcome-hero-logo">
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
               </div>
-            );
-          })}
-
-          {loading && (
-            <div className="message assistant">
-              <div className="typing">
-                <span></span><span></span><span></span>
-              </div>
+              <h1 className="welcome-hero-title">SLTMobitel Support</h1>
+              <p className="welcome-hero-subtitle">Intelligent Backoffice Assistant</p>
+              <div className="welcome-hero-divider"></div>
+              <p className="welcome-hero-instruction">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="19" y1="12" x2="5" y2="12"></line>
+                  <polyline points="12 19 5 12 12 5"></polyline>
+                </svg>
+                Please select an agent from the sidebar to begin.
+              </p>
             </div>
-          )}
-        </div>
-
-        <div className="chat-input">
-          <input
-            type="text"
-            placeholder="Enter Subscriber ID and press Send..."
-            value={subscriberId}
-            onChange={(e) => setSubscriberId(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
-          />
-          <button onClick={handleSubmit}>Send</button>
-        </div>
-      </div>
-
-      {/* ── Resizer ───────────────────────────────────────────────────── */}
-      <div className="resizer" onMouseDown={startResizing} title="Drag to resize panel"></div>
-
-      {/* ── Tech Panel (right side) ───────────────────────────────────── */}
-      <div className="tech-panel">
-        <h3>Technical Details</h3>
-
-        {techRows.length > 0 ? (
+          </div>
+        ) : (
           <>
-            {renderTechDashboard()}
-            <div className="tech-data">
-              {techRows.map(({ key, value }, i) => (
-                <div key={i} className="tech-row">
-                  <span className="tech-key">{key}</span>
-                  <span className={`tech-value ${statusColor(value)}`}>
-                    {value}
-                  </span>
+            {/* Dynamic header */}
+            <div className={`chat-header ${isEmailAgentSelected || isNonImplemented ? "centered-header" : ""}`}>
+              {isEmailAgentSelected
+                ? "BACKOFFICE EMAIL"
+                : isNonImplemented
+                  ? selectedAgent.toUpperCase()
+                  : "Technical Support Assistant"}
+            </div>
+
+        {/* Non-implemented agents: blank body, no chat UI */}
+        {isNonImplemented ? (
+          <div className="chat-box blank-chat-box"></div>
+        ) : (
+          <>
+            {/* Chat messages area */}
+            <div className={`chat-box ${isEmailAgentSelected ? "email-chat-box" : ""}`}>
+              {selectedAgent === "Configuration Agent" && chatMessages.length === 0 ? (
+                <div className="agent-empty-state">
+                  <div className="agent-empty-icon config-icon">
+                    <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+                    </svg>
+                  </div>
+                  <h2 className="agent-empty-title">Configuration Diagnostics</h2>
+                  <p className="agent-empty-subtitle">Enter a Subscriber ID to run a full diagnostic scan and retrieve live network metrics.</p>
                 </div>
-              ))}
+              ) : isEmailAgentSelected && chatMessages.length === 0 ? (
+                <div className="agent-empty-state">
+                  <div className="agent-empty-icon email-icon">
+                    <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                      <polyline points="22,6 12,13 2,6"></polyline>
+                    </svg>
+                  </div>
+                  <h2 className="agent-empty-title">Email Solution Assistant</h2>
+                  <p className="agent-empty-subtitle">Describe the customer's email issue. I'll analyze the symptoms and provide real-time troubleshooting steps.</p>
+                </div>
+              ) : (
+                chatMessages.map((msg, index) => {
+                  const isLatestMessageAndAssistant = index === chatMessages.length - 1 && msg.role === "assistant";
+
+                  if (isEmailAgentSelected) {
+                    // Email Agent: Full-width rectangle card layout
+                    const isUser = msg.role === "user";
+                    return (
+                      <div
+                        key={index}
+                        className={`email-msg-card ${isUser ? "email-msg-user" : "email-msg-assistant"}`}
+                      >
+                        <div className="email-msg-avatar">
+                          {isUser ? "👤" : "🤖"}
+                        </div>
+                        <div className="email-msg-text">
+                          {renderMessageContent(msg)}
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  // Other agents: original bubble layout
+                  return (
+                    <div
+                      key={index}
+                      className={msg.role === "assistant" ? "message assistant" : "message user"}
+                    >
+                      <div className="message-avatar">
+                        {msg.role === "user" ? "👤" : "🤖"}
+                      </div>
+                      <div className="message-content">
+                        {renderMessageContent(msg)}
+                      </div>
+
+                      {msg.workflow && msg.workflow.length > 0 && (
+                        <div className="workflow-section">
+                          <strong>⚙ Workflow Execution:</strong>
+                          <ul>
+                            {msg.workflow.map((step, i) => (
+                              <li key={i}>{step}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {msg.techDetails && msg.techDetails.length > 0 && !isLatestMessageAndAssistant && (
+                        <details className="chat-tech-details">
+                          <summary>View Technical Details</summary>
+                          <div className="tech-data">
+                            {msg.techDetails.map((row, i) => {
+                              if (row.isSection && !row.isSubSection) {
+                                return (
+                                  <div key={i} className="tech-row tech-section-header">
+                                    <span className="tech-section-label">{row.key.trim()}</span>
+                                  </div>
+                                );
+                              }
+                              if (row.isSubSection) {
+                                return (
+                                  <div key={i} className="tech-row tech-row-indented tech-subsection-header">
+                                    <span className="tech-subsection-label">{row.key.trim()}</span>
+                                  </div>
+                                );
+                              }
+                              let rowClass = "tech-row";
+                              if (row.isDoubleIndented) {
+                                rowClass += " tech-row-double-indented";
+                              } else if (row.isIndented) {
+                                rowClass += " tech-row-indented";
+                              }
+                              return (
+                                <div key={i} className={rowClass}>
+                                  <span className="tech-key">{row.key.trim()}</span>
+                                  <span className={`tech-value ${statusColor(row.value)}`}>
+                                    {row.value}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </details>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+
+              {loading && (
+                <div className="message assistant">
+                  <div className="typing">
+                    <span></span><span></span><span></span>
+                  </div>
+                </div>
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+
+            {/* Chat input */}
+            <div className="chat-input">
+              <div className="chat-input-container">
+                <input
+                  type="text"
+                  placeholder={isEmailAgentSelected ? "Type your message..." : "Enter Subscriber ID and press Send..."}
+                  value={subscriberId}
+                  onChange={(e) => setSubscriberId(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+                />
+                <button className="send-icon-btn" onClick={handleSubmit} title="Send Message">
+                  <svg viewBox="0 0 24 24" className="send-icon">
+                    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+                  </svg>
+                </button>
+              </div>
             </div>
           </>
-        ) : (
-          <p className="no-data">No technical data yet.<br />Submit a query to see details.</p>
+        )}
+        </>
         )}
       </div>
+
+      {/* ── Resizer & Tech Panel — shown only when showTechPanel is true ── */}
+      {showTechPanel && (
+        <>
+          <div className="resizer" onMouseDown={startResizing} title="Drag to resize panel"></div>
+          <div className="tech-panel">
+            <h3>Technical Details</h3>
+
+            {techRows.length > 0 ? (
+              <>
+                {renderTechDashboard()}
+                <div className="tech-data">
+                  {techRows.map((row, i) => {
+                    if (row.isSection && !row.isSubSection) {
+                      return (
+                        <div key={i} className="tech-row tech-section-header">
+                          <span className="tech-section-label">{row.key.trim()}</span>
+                        </div>
+                      );
+                    }
+                    if (row.isSubSection) {
+                      return (
+                        <div key={i} className="tech-row tech-row-indented tech-subsection-header">
+                          <span className="tech-subsection-label">{row.key.trim()}</span>
+                        </div>
+                      );
+                    }
+                    let rowClass = "tech-row";
+                    if (row.isDoubleIndented) {
+                      rowClass += " tech-row-double-indented";
+                    } else if (row.isIndented) {
+                      rowClass += " tech-row-indented";
+                    }
+                    return (
+                      <div key={i} className={rowClass}>
+                        <span className="tech-key">{row.key.trim()}</span>
+                        <span className={`tech-value ${statusColor(row.value)}`}>
+                          {row.value}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            ) : (
+              <p className="no-data">No technical data yet.<br />Submit a query to see details.</p>
+            )}
+          </div>
+        </>
+      )}
 
     </div>
   );
