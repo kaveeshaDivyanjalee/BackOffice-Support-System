@@ -246,6 +246,7 @@ body {
   align-self: flex-start;
   color: var(--slt-blue);
 }
+
 .message.assistant .message-avatar::after {
   content: "Assistant";
 }
@@ -1131,6 +1132,7 @@ details.chat-tech-details .tech-data {
   font-size: 13px;
   color: var(--slt-blue);
 }
+
 .email-msg-assistant .email-msg-avatar::after {
   content: "Email Assistant";
 }
@@ -1157,6 +1159,7 @@ details.chat-tech-details .tech-data {
   overflow-x: hidden !important;
   box-sizing: border-box;
 }
+
 /* %% Welcome Hero (Default UI) %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
 .welcome-hero-container {
   height: 100%;
@@ -1232,13 +1235,27 @@ details.chat-tech-details .tech-data {
 }
 
 @keyframes fadeUpHero {
-  from { opacity: 0; transform: translateY(30px) scale(0.95); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from {
+    opacity: 0;
+    transform: translateY(30px) scale(0.95);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 @keyframes bounceLeft {
-  0%, 100% { transform: translateX(0); }
-  50% { transform: translateX(-4px); }
+
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+
+  50% {
+    transform: translateX(-4px);
+  }
 }
 
 
@@ -1297,4 +1314,3 @@ details.chat-tech-details .tech-data {
   line-height: 1.6;
   margin: 0;
 }
-

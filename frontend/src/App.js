@@ -409,13 +409,6 @@ function App() {
       return;
     }
 
-    if (subscriberId.trim() !== "94113627500") {
-      appendMessage(selectedAgent, { role: "user", content: `Subscriber ID: ${subscriberId}` });
-      appendMessage(selectedAgent, { role: "assistant", content: "Subscriber ID is not found .Please Enter valid subscriber ID" });
-      setSubscriberId("");
-      return;
-    }
-
     // Instantly show the user's message bubble, appending to previous chats
     appendMessage(selectedAgent, { role: "user", content: `Subscriber ID: ${subscriberId}` });
 
@@ -440,6 +433,19 @@ function App() {
 
       const data = await response.json();
       console.log("Full backend response:", JSON.stringify(data, null, 2));
+
+      // Handle backend or n8n errors gracefully
+      if (data.status === "error" || data.error) {
+        const errMsg = data.reply || data.message || data.error || "An error occurred during analysis.";
+        appendMessage(selectedAgent, {
+          role: "assistant",
+          content: `❌ ${errMsg}`,
+          workflow: []
+        });
+        setSubscriberId("");
+        setLoading(false);
+        return;
+      }
 
       // ── 1. Store raw api_data from HTTP node ──────────────────────────
       const rawApiData = data.api_data || null;
@@ -597,6 +603,35 @@ function App() {
       }
 
       setDevOutput(parsedDev);
+
+      // Detect if subscriber ID is invalid/not found in the SLT APIs
+      // A valid response has rawApiData as a non-empty object with real data keys.
+      // An invalid/not-found response is null, empty, or contains only error/status metadata.
+      const ERROR_ONLY_KEYS = new Set(["error", "status", "message", "errorCode", "errorMessage"]);
+      const hasRealData = rawApiData &&
+                          typeof rawApiData === "object" &&
+                          Object.keys(rawApiData).length > 0 &&
+                          Object.keys(rawApiData).some(k => !ERROR_ONLY_KEYS.has(k));
+
+      // Also check if the API explicitly returned an error status
+      const apiHasError = rawApiData &&
+                          (rawApiData.error || 
+                           (rawApiData.status && String(rawApiData.status).toLowerCase().includes("error")) ||
+                           (rawApiData.errorCode && String(rawApiData.errorCode) !== "0"));
+
+      if (!hasRealData || apiHasError) {
+        // Clear technical data so the Tech Panel does not appear
+        setApiData(null);
+        setDevOutput(null);
+        appendMessage(selectedAgent, {
+          role: "assistant",
+          content: "💡 The subscriber ID entered is invalid or could not be found. Please check and try again.",
+          workflow: []
+        });
+        setSubscriberId("");
+        setLoading(false);
+        return;
+      }
 
       const messageTechDetails = buildTechRows(rawApiData, parsedDev);
 
@@ -832,9 +867,9 @@ function App() {
       return (
         <div className="email-agent-response">
           {content.split("\n").map((line, i) => (
-            <div 
-              key={i} 
-              className="message-line" 
+            <div
+              key={i}
+              className="message-line"
               dangerouslySetInnerHTML={{ __html: formatMarkdownToHTML(line) }}
             />
           ))}
@@ -908,7 +943,7 @@ function App() {
             <div className="welcome-hero-card">
               <div className="welcome-hero-logo">
                 <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </div>
               <h1 className="welcome-hero-title">SLTMobitel Support</h1>
@@ -934,152 +969,152 @@ function App() {
                   : "Technical Support Assistant"}
             </div>
 
-        {/* Non-implemented agents: blank body, no chat UI */}
-        {isNonImplemented ? (
-          <div className="chat-box blank-chat-box"></div>
-        ) : (
-          <>
-            {/* Chat messages area */}
-            <div className={`chat-box ${isEmailAgentSelected ? "email-chat-box" : ""}`}>
-              {selectedAgent === "Configuration Agent" && chatMessages.length === 0 ? (
-                <div className="agent-empty-state">
-                  <div className="agent-empty-icon config-icon">
-                    <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
-                    </svg>
-                  </div>
-                  <h2 className="agent-empty-title">Configuration Diagnostics</h2>
-                  <p className="agent-empty-subtitle">Enter a Subscriber ID to run a full diagnostic scan and retrieve live network metrics.</p>
-                </div>
-              ) : isEmailAgentSelected && chatMessages.length === 0 ? (
-                <div className="agent-empty-state">
-                  <div className="agent-empty-icon email-icon">
-                    <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
-                      <polyline points="22,6 12,13 2,6"></polyline>
-                    </svg>
-                  </div>
-                  <h2 className="agent-empty-title">Email Solution Assistant</h2>
-                  <p className="agent-empty-subtitle">Describe the customer's email issue. I'll analyze the symptoms and provide real-time troubleshooting steps.</p>
-                </div>
-              ) : (
-                chatMessages.map((msg, index) => {
-                  const isLatestMessageAndAssistant = index === chatMessages.length - 1 && msg.role === "assistant";
-
-                  if (isEmailAgentSelected) {
-                    // Email Agent: Full-width rectangle card layout
-                    const isUser = msg.role === "user";
-                    return (
-                      <div
-                        key={index}
-                        className={`email-msg-card ${isUser ? "email-msg-user" : "email-msg-assistant"}`}
-                      >
-                        <div className="email-msg-avatar">
-                          {isUser ? "👤" : "🤖"}
-                        </div>
-                        <div className="email-msg-text">
-                          {renderMessageContent(msg)}
-                        </div>
+            {/* Non-implemented agents: blank body, no chat UI */}
+            {isNonImplemented ? (
+              <div className="chat-box blank-chat-box"></div>
+            ) : (
+              <>
+                {/* Chat messages area */}
+                <div className={`chat-box ${isEmailAgentSelected ? "email-chat-box" : ""}`}>
+                  {selectedAgent === "Configuration Agent" && chatMessages.length === 0 ? (
+                    <div className="agent-empty-state">
+                      <div className="agent-empty-icon config-icon">
+                        <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+                        </svg>
                       </div>
-                    );
-                  }
-
-                  // Other agents: original bubble layout
-                  return (
-                    <div
-                      key={index}
-                      className={msg.role === "assistant" ? "message assistant" : "message user"}
-                    >
-                      <div className="message-avatar">
-                        {msg.role === "user" ? "👤" : "🤖"}
-                      </div>
-                      <div className="message-content">
-                        {renderMessageContent(msg)}
-                      </div>
-
-                      {msg.workflow && msg.workflow.length > 0 && (
-                        <div className="workflow-section">
-                          <strong>⚙ Workflow Execution:</strong>
-                          <ul>
-                            {msg.workflow.map((step, i) => (
-                              <li key={i}>{step}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-
-                      {msg.techDetails && msg.techDetails.length > 0 && !isLatestMessageAndAssistant && (
-                        <details className="chat-tech-details">
-                          <summary>View Technical Details</summary>
-                          <div className="tech-data">
-                            {msg.techDetails.map((row, i) => {
-                              if (row.isSection && !row.isSubSection) {
-                                return (
-                                  <div key={i} className="tech-row tech-section-header">
-                                    <span className="tech-section-label">{row.key.trim()}</span>
-                                  </div>
-                                );
-                              }
-                              if (row.isSubSection) {
-                                return (
-                                  <div key={i} className="tech-row tech-row-indented tech-subsection-header">
-                                    <span className="tech-subsection-label">{row.key.trim()}</span>
-                                  </div>
-                                );
-                              }
-                              let rowClass = "tech-row";
-                              if (row.isDoubleIndented) {
-                                rowClass += " tech-row-double-indented";
-                              } else if (row.isIndented) {
-                                rowClass += " tech-row-indented";
-                              }
-                              return (
-                                <div key={i} className={rowClass}>
-                                  <span className="tech-key">{row.key.trim()}</span>
-                                  <span className={`tech-value ${statusColor(row.value)}`}>
-                                    {row.value}
-                                  </span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </details>
-                      )}
+                      <h2 className="agent-empty-title">Configuration Diagnostics</h2>
+                      <p className="agent-empty-subtitle">Enter a Subscriber ID to begin the diagnostic analysis.</p>
                     </div>
-                  );
-                })
-              )}
+                  ) : isEmailAgentSelected && chatMessages.length === 0 ? (
+                    <div className="agent-empty-state">
+                      <div className="agent-empty-icon email-icon">
+                        <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                          <polyline points="22,6 12,13 2,6"></polyline>
+                        </svg>
+                      </div>
+                      <h2 className="agent-empty-title">Email Solution Assistant</h2>
+                      <p className="agent-empty-subtitle">Describe the customer's email issue. I'll analyze the symptoms and provide real-time troubleshooting steps.</p>
+                    </div>
+                  ) : (
+                    chatMessages.map((msg, index) => {
+                      const isLatestMessageAndAssistant = index === chatMessages.length - 1 && msg.role === "assistant";
 
-              {loading && (
-                <div className="message assistant">
-                  <div className="typing">
-                    <span></span><span></span><span></span>
+                      if (isEmailAgentSelected) {
+                        // Email Agent: Full-width rectangle card layout
+                        const isUser = msg.role === "user";
+                        return (
+                          <div
+                            key={index}
+                            className={`email-msg-card ${isUser ? "email-msg-user" : "email-msg-assistant"}`}
+                          >
+                            <div className="email-msg-avatar">
+                              {isUser ? "👤" : "🤖"}
+                            </div>
+                            <div className="email-msg-text">
+                              {renderMessageContent(msg)}
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      // Other agents: original bubble layout
+                      return (
+                        <div
+                          key={index}
+                          className={msg.role === "assistant" ? "message assistant" : "message user"}
+                        >
+                          <div className="message-avatar">
+                            {msg.role === "user" ? "👤" : "🤖"}
+                          </div>
+                          <div className="message-content">
+                            {renderMessageContent(msg)}
+                          </div>
+
+                          {msg.workflow && msg.workflow.length > 0 && (
+                            <div className="workflow-section">
+                              <strong>⚙ Workflow Execution:</strong>
+                              <ul>
+                                {msg.workflow.map((step, i) => (
+                                  <li key={i}>{step}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+
+                          {msg.techDetails && msg.techDetails.length > 0 && !isLatestMessageAndAssistant && (
+                            <details className="chat-tech-details">
+                              <summary>View Technical Details</summary>
+                              <div className="tech-data">
+                                {msg.techDetails.map((row, i) => {
+                                  if (row.isSection && !row.isSubSection) {
+                                    return (
+                                      <div key={i} className="tech-row tech-section-header">
+                                        <span className="tech-section-label">{row.key.trim()}</span>
+                                      </div>
+                                    );
+                                  }
+                                  if (row.isSubSection) {
+                                    return (
+                                      <div key={i} className="tech-row tech-row-indented tech-subsection-header">
+                                        <span className="tech-subsection-label">{row.key.trim()}</span>
+                                      </div>
+                                    );
+                                  }
+                                  let rowClass = "tech-row";
+                                  if (row.isDoubleIndented) {
+                                    rowClass += " tech-row-double-indented";
+                                  } else if (row.isIndented) {
+                                    rowClass += " tech-row-indented";
+                                  }
+                                  return (
+                                    <div key={i} className={rowClass}>
+                                      <span className="tech-key">{row.key.trim()}</span>
+                                      <span className={`tech-value ${statusColor(row.value)}`}>
+                                        {row.value}
+                                      </span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </details>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+
+                  {loading && (
+                    <div className="message assistant">
+                      <div className="typing">
+                        <span></span><span></span><span></span>
+                      </div>
+                    </div>
+                  )}
+                  <div ref={messagesEndRef} />
+                </div>
+
+                {/* Chat input */}
+                <div className="chat-input">
+                  <div className="chat-input-container">
+                    <input
+                      type="text"
+                      placeholder={isEmailAgentSelected ? "Type your message..." : "Enter Subscriber ID..."}
+                      value={subscriberId}
+                      onChange={(e) => setSubscriberId(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+                    />
+                    <button className="send-icon-btn" onClick={handleSubmit} title="Send Message">
+                      <svg viewBox="0 0 24 24" className="send-icon">
+                        <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+                      </svg>
+                    </button>
                   </div>
                 </div>
-              )}
-              <div ref={messagesEndRef} />
-            </div>
-
-            {/* Chat input */}
-            <div className="chat-input">
-              <div className="chat-input-container">
-                <input
-                  type="text"
-                  placeholder={isEmailAgentSelected ? "Type your message..." : "Enter Subscriber ID and press Send..."}
-                  value={subscriberId}
-                  onChange={(e) => setSubscriberId(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
-                />
-                <button className="send-icon-btn" onClick={handleSubmit} title="Send Message">
-                  <svg viewBox="0 0 24 24" className="send-icon">
-                    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
-                  </svg>
-                </button>
-              </div>
-            </div>
+              </>
+            )}
           </>
-        )}
-        </>
         )}
       </div>
 
