@@ -216,6 +216,14 @@ function statusColor(val) {
   return "badge-blue";
 }
 
+// Helper to resolve API URLs dynamically based on client access host
+const getApiUrl = (path) => {
+  const hostname = window.location.hostname;
+  const isLocal = hostname === "localhost" || hostname === "127.0.0.1";
+  const base = isLocal ? "http://localhost:8000" : `http://${hostname}:8000`;
+  return `${base}${path}`;
+};
+
 // ═══════════════════════════════════════════════════════════════════════════
 function App() {
   const [selectedAgent, setSelectedAgent] = useState("");
@@ -379,7 +387,7 @@ function App() {
       setLoading(true);
 
       try {
-        const response = await fetch("http://localhost:8000/email-chat", {
+        const response = await fetch(getApiUrl("/email-chat"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -419,7 +427,7 @@ function App() {
     setLoading(true);
 
     try {
-      const response = await fetch("http://localhost:8000/support-query", {
+      const response = await fetch(getApiUrl("/support-query"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

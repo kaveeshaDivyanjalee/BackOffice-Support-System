@@ -19,7 +19,7 @@ services:
       dockerfile: Dockerfile
     container_name: backoffice_frontend
     ports:
-      - "80:80"
+      - "3001:80"
     depends_on:
       - backend
     restart: unless-stopped
