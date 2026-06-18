@@ -1,0 +1,71 @@
+# ──────────────────────────────────────────────
+# Backoffice Agent - Host Nginx Config
+# Domain: backofficeagent.sltdigitallab.lk
+# Deploy to: /etc/nginx/sites-available/backofficeagent
+# Symlink:   ln -s /etc/nginx/sites-available/backofficeagent /etc/nginx/sites-enabled/backofficeagent
+# ──────────────────────────────────────────────
+
+# HTTP → HTTPS redirect
+server {
+    listen 80;
+    server_name backofficeagent.sltdigitallab.lk;
+
+    # Let's Encrypt ACME challenge
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# HTTPS
+server {
+    listen 443 ssl http2;
+    server_name backofficeagent.sltdigitallab.lk;
+
+    # SSL certificates (managed by Certbot)
+    ssl_certificate /etc/letsencrypt/live/backofficeagent.sltdigitallab.lk/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/backofficeagent.sltdigitallab.lk/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+
+    # Backend API routes → Docker backend on port 8085
+    location /support-query {
+        proxy_pass http://127.0.0.1:8085;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+        proxy_connect_timeout 10s;
+    }
+
+    location /email-chat {
+        proxy_pass http://127.0.0.1:8085;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+        proxy_connect_timeout 10s;
+    }
+
+    # Frontend (React app) → Docker frontend on port 8084
+    location / {
+        proxy_pass http://127.0.0.1:8084;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}

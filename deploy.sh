@@ -10,77 +10,41 @@ echo "========================================="
 echo "  BackOffice Support System Deployment"
 echo "========================================="
 
-# ── Step 1: Create a temporary Nginx config WITHOUT SSL (for initial cert request)
+# ── Step 1: Stop old containers (including old nginx/certbot if they exist)
 echo ""
-echo "[1/5] Creating temporary Nginx config for SSL certificate request..."
-
-# Create a temporary HTTP-only config for the cert request
-cat > nginx/default.conf << 'NGINX_TEMP'
-server {
-    listen 80;
-    server_name backofficeagent.sltdigitallab.lk;
-
-    # Let's Encrypt ACME challenge
-    location /.well-known/acme-challenge/ {
-        root /var/www/certbot;
-    }
-
-    # Backend API routes (HTTP only for initial setup)
-    location /support-query {
-        proxy_pass http://backend:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_read_timeout 120s;
-    }
-
-    location /email-chat {
-        proxy_pass http://backend:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_read_timeout 120s;
-    }
-
-    location / {
-        proxy_pass http://frontend:80;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    }
-}
-NGINX_TEMP
-
-# ── Step 2: Build and start containers
-echo ""
-echo "[2/5] Building and starting Docker containers..."
+echo "[1/6] Stopping old containers..."
+cd /opt/backoffice
 docker compose down 2>/dev/null || true
+
+# ── Step 2: Build and start the backend + frontend containers
+echo ""
+echo "[2/6] Building and starting Docker containers..."
 docker compose up -d --build
 
 echo ""
 echo "Waiting 10 seconds for services to start..."
 sleep 10
 
-# ── Step 3: Request SSL certificate from Let's Encrypt
+# ── Step 3: Verify containers are running
 echo ""
-echo "[3/5] Requesting SSL certificate from Let's Encrypt..."
-docker compose run --rm --entrypoint certbot certbot certonly \
-    --webroot \
-    --webroot-path=/var/www/certbot \
-    --email kaveeshadivyanjaleej4@gmail.com \
-    --agree-tos \
-    --no-eff-email \
-    -d backofficeagent.sltdigitallab.lk
+echo "[3/6] Verifying containers..."
+docker ps --format "table {{.Names}}\t{{.Ports}}\t{{.Status}}" | grep backoffice
 
-# ── Step 4: Restore the production SSL Nginx config
+# ── Step 4: Install Host Nginx config
 echo ""
-echo "[4/5] Switching to production SSL config..."
-cp nginx/default.conf.ssl nginx/default.conf
+echo "[4/6] Installing Host Nginx config for backofficeagent..."
+cp /opt/backoffice/nginx/backofficeagent /etc/nginx/sites-available/backofficeagent
+ln -sf /etc/nginx/sites-available/backofficeagent /etc/nginx/sites-enabled/backofficeagent
 
-# ── Step 5: Reload Nginx to apply SSL
+# ── Step 5: Test Nginx config
 echo ""
-echo "[5/5] Reloading Nginx with SSL..."
-docker compose exec nginx nginx -s reload
+echo "[5/6] Testing Nginx configuration..."
+nginx -t
+
+# ── Step 6: Reload Host Nginx
+echo ""
+echo "[6/6] Reloading Host Nginx..."
+systemctl reload nginx
 
 echo ""
 echo "========================================="
@@ -90,6 +54,10 @@ echo ""
 echo "  Your app is now live at:"
 echo "  🌐 https://backofficeagent.sltdigitallab.lk"
 echo ""
-echo "  ⚠️  Make sure the DNS A record is set:"
-echo "     backofficeagent → 146.190.105.2"
+echo "  Port Map:"
+echo "  Frontend → 127.0.0.1:8084"
+echo "  Backend  → 127.0.0.1:8085"
+echo ""
+echo "  ⚠️  If SSL cert doesn't exist yet, run:"
+echo "  certbot --nginx -d backofficeagent.sltdigitallab.lk"
 echo ""
