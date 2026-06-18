@@ -19,6 +19,9 @@ RUN npm run build
 # Stage 2: Serve the app with Nginx
 FROM nginx:alpine
 
+# Copy custom Nginx config for client-side routing fallback
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
 # Copy the build output from the previous stage to Nginx's html directory
 COPY --from=build /app/build /usr/share/nginx/html
 

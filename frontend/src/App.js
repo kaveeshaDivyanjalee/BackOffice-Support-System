@@ -225,9 +225,29 @@ const getApiUrl = (path) => {
   return `${base}${path}`;
 };
 
+// Map URL pathnames to agent names
+const AGENT_PATH_MAP = {
+  "/main-agent": "Main Agent",
+  "/usage-agent": "Usage Agent",
+  "/email-agent": "Email Solution Agent",
+  "/config-agent": "Configuration Agent"
+};
+
+const REVERSE_AGENT_PATH_MAP = {
+  "Main Agent": "main-agent",
+  "Usage Agent": "usage-agent",
+  "Email Solution Agent": "email-agent",
+  "Configuration Agent": "config-agent"
+};
+
 // ═══════════════════════════════════════════════════════════════════════════
 function App() {
-  const [selectedAgent, setSelectedAgent] = useState("Email Solution Agent");
+  const getInitialAgent = () => {
+    const path = window.location.pathname.toLowerCase();
+    return AGENT_PATH_MAP[path] || "Email Solution Agent";
+  };
+
+  const [selectedAgent, setSelectedAgent] = useState(getInitialAgent);
   const [subscriberId, setSubscriberId] = useState("");
   const [allAgentMessages, setAllAgentMessages] = useState({}); // per-agent chat history
   const [loading, setLoading] = useState(false);
@@ -247,6 +267,33 @@ function App() {
     scrollToBottom();
   }, [chatMessages, loading]);
 
+  useEffect(() => {
+    const handlePopState = () => {
+      const path = window.location.pathname.toLowerCase();
+      const agent = AGENT_PATH_MAP[path] || "Email Solution Agent";
+      setSelectedAgent(agent);
+      setSubscriberId("");
+
+      const agentMessages = allAgentMessages[agent] || [];
+      let lastApiData = null;
+      let lastDevOutput = null;
+
+      for (let i = agentMessages.length - 1; i >= 0; i--) {
+        const msg = agentMessages[i];
+        if (msg.role === "assistant" && (msg.apiDataRaw || msg.devOutputRaw)) {
+          lastApiData = msg.apiDataRaw || null;
+          lastDevOutput = msg.devOutputRaw || null;
+          break;
+        }
+      }
+      setApiData(lastApiData);
+      setDevOutput(lastDevOutput);
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [allAgentMessages]);
+
   // Helper to append messages to the active agent's history
   const appendMessage = (agent, msg) => {
     setAllAgentMessages(prev => ({
@@ -259,6 +306,13 @@ function App() {
   const handleSelectAgent = (agent) => {
     setSelectedAgent(agent);
     setSubscriberId("");
+
+    // Update URL path without reloading page
+    const code = REVERSE_AGENT_PATH_MAP[agent];
+    if (code) {
+      const newUrl = `${window.location.protocol}//${window.location.host}/${code}`;
+      window.history.pushState({ agent }, "", newUrl);
+    }
 
     const agentMessages = allAgentMessages[agent] || [];
     let lastApiData = null;
