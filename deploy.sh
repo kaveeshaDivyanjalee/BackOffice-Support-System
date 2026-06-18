@@ -70,7 +70,7 @@ echo "[3/5] Requesting SSL certificate from Let's Encrypt..."
 docker compose run --rm certbot certonly \
     --webroot \
     --webroot-path=/var/www/certbot \
-    --email your-email@sltdigitallab.lk \
+    --email kaveeshadivyanjaleej4@gmail.com \
     --agree-tos \
     --no-eff-email \
     -d backofficeagent.sltdigitallab.lk
