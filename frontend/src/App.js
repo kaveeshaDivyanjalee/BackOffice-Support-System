@@ -227,7 +227,7 @@ const getApiUrl = (path) => {
 
 // ═══════════════════════════════════════════════════════════════════════════
 function App() {
-  const [selectedAgent, setSelectedAgent] = useState("");
+  const [selectedAgent, setSelectedAgent] = useState("Email Solution Agent");
   const [subscriberId, setSubscriberId] = useState("");
   const [allAgentMessages, setAllAgentMessages] = useState({}); // per-agent chat history
   const [loading, setLoading] = useState(false);
@@ -933,7 +933,7 @@ function App() {
 
       {/* ── Sidebar ───────────────────────────────────────────────────── */}
       <div className="sidebar">
-        <div className="logo">SLTMobitel Support</div>
+        <div className="logo">Blitz AI</div>
 
         <h2>Agent Selector</h2>
 
@@ -950,30 +950,10 @@ function App() {
 
       {/* ── Chat Section ──────────────────────────────────────────────── */}
       <div className="chat-section">
-        {!selectedAgent ? (
-          <div className="welcome-hero-container">
-            <div className="welcome-hero-card">
-              <div className="welcome-hero-logo">
-                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </div>
-              <h1 className="welcome-hero-title">SLTMobitel Support</h1>
-              <p className="welcome-hero-subtitle">Intelligent Backoffice Assistant</p>
-              <div className="welcome-hero-divider"></div>
-              <p className="welcome-hero-instruction">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="19" y1="12" x2="5" y2="12"></line>
-                  <polyline points="12 19 5 12 12 5"></polyline>
-                </svg>
-                Please select an agent from the sidebar to begin.
-              </p>
-            </div>
-          </div>
-        ) : (
+        {selectedAgent && (
           <>
             {/* Dynamic header */}
-            <div className={`chat-header ${isEmailAgentSelected || isNonImplemented ? "centered-header" : ""}`}>
+            <div className="chat-header centered-header">
               {isEmailAgentSelected
                 ? "BACKOFFICE EMAIL"
                 : isNonImplemented

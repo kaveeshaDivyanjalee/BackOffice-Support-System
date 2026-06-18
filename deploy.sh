@@ -14,9 +14,6 @@ echo "========================================="
 echo ""
 echo "[1/5] Creating temporary Nginx config for SSL certificate request..."
 
-# Back up the production SSL config
-cp nginx/default.conf nginx/default.conf.ssl
-
 # Create a temporary HTTP-only config for the cert request
 cat > nginx/default.conf << 'NGINX_TEMP'
 server {
@@ -67,7 +64,7 @@ sleep 10
 # ── Step 3: Request SSL certificate from Let's Encrypt
 echo ""
 echo "[3/5] Requesting SSL certificate from Let's Encrypt..."
-docker compose run --rm certbot certonly \
+docker compose run --rm --entrypoint certbot certbot certonly \
     --webroot \
     --webroot-path=/var/www/certbot \
     --email kaveeshadivyanjaleej4@gmail.com \
