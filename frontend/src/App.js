@@ -413,12 +413,15 @@ function App() {
     }
 
     if (!subscriberId) {
-      alert("Please enter a Subscriber ID");
+      alert("Please enter a Subscriber ID or Customer ID");
       return;
     }
 
+    // Determine label based on format: numeric = Subscriber ID, ACC-prefix = Customer ID
+    const idLabel = /^\d+$/.test(subscriberId.trim()) ? "Subscriber ID" : "Customer ID";
+
     // Instantly show the user's message bubble, appending to previous chats
-    appendMessage(selectedAgent, { role: "user", content: `Subscriber ID: ${subscriberId}` });
+    appendMessage(selectedAgent, { role: "user", content: `${idLabel} : ${subscriberId}` });
 
     // Clear old technical details while loading
     setApiData(null);
@@ -512,7 +515,7 @@ function App() {
         customerSummary = customerSummary.replace(/(?:-\s*)?(?:summary|next_steps|customer_output)\s*:/gi, "").trim();
         chatMessage = `💡 ${customerSummary}\n\n`;
       }
-      chatMessage += `Subscriber ${subscriberId} — analysis complete. See Technical Details`;
+      chatMessage += `${idLabel} ${subscriberId} — analysis complete. See Technical Details`;
 
       // Helper: extract from a string (raw AI text)
       const extractFromString = (str) => {
@@ -633,7 +636,7 @@ function App() {
         setDevOutput(null);
         appendMessage(selectedAgent, {
           role: "assistant",
-          content: "💡 The subscriber ID entered is invalid or could not be found. Please check and try again.",
+          content: "💡 The ID entered could not be found. Please verify the Subscriber ID or Customer ID and try again.",
           workflow: []
         });
         setSubscriberId("");
@@ -992,7 +995,7 @@ function App() {
                         </svg>
                       </div>
                       <h2 className="agent-empty-title">Configuration Diagnostics</h2>
-                      <p className="agent-empty-subtitle">Enter a Subscriber ID to begin the diagnostic analysis.</p>
+                      <p className="agent-empty-subtitle">Enter a Subscriber ID or Customer ID to begin the diagnostic analysis.</p>
                     </div>
                   ) : isEmailAgentSelected && chatMessages.length === 0 ? (
                     <div className="agent-empty-state">
@@ -1108,7 +1111,7 @@ function App() {
                   <div className="chat-input-container">
                     <input
                       type="text"
-                      placeholder={isEmailAgentSelected ? "Type your message..." : "Enter Subscriber ID..."}
+                      placeholder={isEmailAgentSelected ? "Type your message..." : "Enter Subscriber ID or Customer ID..."}
                       value={subscriberId}
                       onChange={(e) => setSubscriberId(e.target.value)}
                       onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
