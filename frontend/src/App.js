@@ -220,7 +220,8 @@ function statusColor(val) {
 const getApiUrl = (path) => {
   const hostname = window.location.hostname;
   const isLocal = hostname === "localhost" || hostname === "127.0.0.1";
-  const base = isLocal ? "http://localhost:8000" : `http://${hostname}:8000`;
+  // In production, Nginx reverse proxy handles routing — API is on the same origin
+  const base = isLocal ? "http://localhost:8000" : `${window.location.protocol}//${hostname}`;
   return `${base}${path}`;
 };
 
