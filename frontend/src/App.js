@@ -243,6 +243,11 @@ const REVERSE_AGENT_PATH_MAP = {
 // ═══════════════════════════════════════════════════════════════════════════
 function App() {
   const getInitialAgent = () => {
+    // On mobile, always default to Email Solution Agent regardless of URL
+    if (window.innerWidth <= 768) {
+      return "Email Solution Agent";
+    }
+    // On desktop, read from URL path as before
     const path = window.location.pathname.toLowerCase();
     return AGENT_PATH_MAP[path] || "Email Solution Agent";
   };
@@ -312,8 +317,15 @@ function App() {
     // Update URL path without reloading page
     const code = REVERSE_AGENT_PATH_MAP[agent];
     if (code) {
-      const newUrl = `${window.location.protocol}//${window.location.host}/${code}`;
-      window.history.pushState({ agent }, "", newUrl);
+      try {
+        const newUrl = `${window.location.protocol}//${window.location.host}/${code}`;
+        // Only push state on desktop to preserve Web UI behavior exactly as before
+        if (window.innerWidth > 768) {
+          window.history.pushState({ agent }, "", newUrl);
+        }
+      } catch (err) {
+        console.warn("Failed to update URL:", err);
+      }
     }
 
     const agentMessages = allAgentMessages[agent] || [];
@@ -583,10 +595,10 @@ function App() {
       }
 
       if (customerSummary) {
-        // Automatically strip out any semicolons as requested
-        customerSummary = customerSummary.replace(/;/g, "");
-        // Remove leftover keys like "summary:", "- summary:", "next_steps:"
-        customerSummary = customerSummary.replace(/(?:-\s*)?(?:summary|next_steps|customer_output)\s*:/gi, "").trim();
+        // Automatically strip out any semicolons and commas as requested
+        customerSummary = customerSummary.replace(/[;,]/g, "");
+        // Remove leftover keys like "summary:", "- summary:", "next_steps:", "customer_output", "developer_output"
+        customerSummary = customerSummary.replace(/(?:-\s*)?(?:summary|next_steps|customer_output|developer_output)\s*:?/gi, "").trim();
         chatMessage = `💡 ${customerSummary}\n\n`;
       }
       chatMessage += `${idLabel} ${subscriberId} — analysis complete. See Technical Details`;
@@ -1034,19 +1046,20 @@ function App() {
   const showTechPanel = !isEmailAgentSelected && !isNonImplemented && (apiData !== null || devOutput !== null || loading);
 
   return (
-    <div
-      className="container"
-      style={{
-        gridTemplateColumns: showTechPanel
-          ? `240px 1fr 6px ${techPanelWidth}px`
-          : "240px 1fr",
-      }}
-    >
-
-      {/* ── Mobile Overlay ─────────────────────────────────────────── */}
+    <>
+      {/* ── Mobile Overlay (outside container to avoid stacking context issues) ── */}
       {isMobileMenuOpen && (
         <div className="mobile-overlay" onClick={() => setIsMobileMenuOpen(false)}></div>
       )}
+
+      <div
+        className="container"
+        style={{
+          gridTemplateColumns: showTechPanel
+            ? `240px 1fr 6px ${techPanelWidth}px`
+            : "240px 1fr",
+        }}
+      >
 
       {/* ── Sidebar ───────────────────────────────────────────────────── */}
       <div className={`sidebar ${isMobileMenuOpen ? 'mobile-open' : ''}`}>
@@ -1071,6 +1084,8 @@ function App() {
           <>
             {/* Dynamic header */}
             <div className="chat-header centered-header">
+              {/* Mobile-only branding */}
+              <span className="mobile-header-brand">Blitz Ai</span>
               <button className="mobile-menu-btn" onClick={() => setIsMobileMenuOpen(true)}>
                 <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
                   <line x1="3" y1="6" x2="21" y2="6"></line>
@@ -1078,11 +1093,13 @@ function App() {
                   <line x1="3" y1="18" x2="21" y2="18"></line>
                 </svg>
               </button>
+              <span className="header-agent-title">
               {isEmailAgentSelected
                 ? "BACKOFFICE EMAIL"
                 : isNonImplemented
                   ? selectedAgent.toUpperCase()
                   : "TECHNICAL SUPPORT ASSISTANT"}
+              </span>
             </div>
 
             {/* Non-implemented agents: blank body, no chat UI */}
@@ -1317,6 +1334,56 @@ function App() {
       )}
 
     </div>
+
+      {/* ── Mobile Bottom Navigation Bar (mobile only, hidden on desktop) ── */}
+      <nav className="mobile-bottom-nav">
+        {agents.map((agent, index) => {
+          const icons = {
+            "Main Agent": (
+              <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                <polyline points="9 22 9 12 15 12 15 22"/>
+              </svg>
+            ),
+            "Usage Agent": (
+              <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="20" x2="18" y2="10"/>
+                <line x1="12" y1="20" x2="12" y2="4"/>
+                <line x1="6" y1="20" x2="6" y2="14"/>
+              </svg>
+            ),
+            "Email Solution Agent": (
+              <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                <polyline points="22,6 12,13 2,6"/>
+              </svg>
+            ),
+            "Configuration Agent": (
+              <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+              </svg>
+            ),
+          };
+          const labels = {
+            "Main Agent": "Main",
+            "Usage Agent": "Usage",
+            "Email Solution Agent": "Email",
+            "Configuration Agent": "Config",
+          };
+          return (
+            <button
+              key={index}
+              className={`mobile-nav-btn ${selectedAgent === agent ? "active" : ""}`}
+              onClick={() => handleSelectAgent(agent)}
+            >
+              {icons[agent]}
+              <span>{labels[agent]}</span>
+            </button>
+          );
+        })}
+      </nav>
+    </>
   );
 }
 

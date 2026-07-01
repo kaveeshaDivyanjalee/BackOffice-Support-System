@@ -1389,18 +1389,42 @@ details.chat-tech-details .tech-data {
   z-index: 99;
 }
 
+/* Hidden on desktop */
+.mobile-header-brand {
+  display: none;
+}
+
 @media (max-width: 768px) {
 
-  /* Show hamburger button on mobile */
+  /* Show Blitz Ai branding on mobile */
+  .mobile-header-brand {
+    display: block;
+    font-size: 18px;
+    font-weight: 800;
+    color: var(--slt-dark);
+    letter-spacing: -0.02em;
+  }
+
+  /* Show the agent title text on mobile below 'Blitz Ai' */
+  .header-agent-title {
+    display: block;
+    font-size: 15px;
+    font-weight: 800;
+    color: #1e3a8a;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 4px;
+  }
+
+  /* Hide hamburger button on mobile — bottom nav handles navigation */
   .mobile-menu-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    display: none;
   }
 
   /* Show overlay on mobile */
   .mobile-overlay {
     display: block;
+    z-index: 9998;
   }
 
   /* Container becomes single column */
@@ -1409,22 +1433,9 @@ details.chat-tech-details .tech-data {
     position: relative;
   }
 
-  /* Sidebar slides in from the left */
+  /* Completely hide sidebar on mobile — bottom nav handles navigation */
   .sidebar {
-    position: fixed;
-    top: 0;
-    left: -260px;
-    height: 100%;
-    width: 240px;
-    z-index: 100;
-    transition: left 0.3s ease;
-    box-shadow: none;
-  }
-
-  /* Sidebar visible when mobile-open class is added */
-  .sidebar.mobile-open {
-    left: 0;
-    box-shadow: 4px 0 20px rgba(0, 0, 0, 0.3);
+    display: none !important;
   }
 
   /* Chat section takes full width */
@@ -1432,12 +1443,15 @@ details.chat-tech-details .tech-data {
     width: 100%;
   }
 
-  /* Chat header shows hamburger on left */
+  /* Chat header stacks Blitz Ai and agent name vertically on mobile */
   .chat-header {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 12px;
-    padding: 12px 16px;
+    justify-content: center !important;
+    gap: 2px;
+    padding: 10px 16px;
+    text-align: center;
   }
 
   /* Tech panel goes below chat on mobile */
@@ -1466,5 +1480,80 @@ details.chat-tech-details .tech-data {
 
   .tech-column {
     width: 100%;
+  }
+
+  /* Add padding to chat section so content isn't hidden behind bottom nav */
+  .chat-section {
+    padding-bottom: 70px;
+  }
+}
+
+/* ─── Mobile Bottom Navigation Bar ──────────────────────────────────────────── */
+
+/* Hidden on desktop */
+.mobile-bottom-nav {
+  display: none;
+}
+
+.mobile-nav-btn {
+  display: none;
+}
+
+/* Only visible on mobile */
+@media (max-width: 768px) {
+  .mobile-bottom-nav {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 65px;
+    background: linear-gradient(180deg, #001a33 0%, #00091a 100%);
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    z-index: 99999;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .mobile-nav-btn {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    cursor: pointer;
+    padding: 6px 4px;
+    transition: color 0.15s ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .mobile-nav-btn svg {
+    width: 22px;
+    height: 22px;
+    stroke: currentColor;
+    fill: none;
+    flex-shrink: 0;
+    transition: stroke 0.15s ease;
+  }
+
+  .mobile-nav-btn.active {
+    color: #ffffff;
+  }
+
+  .mobile-nav-btn.active svg {
+    stroke: #4da6ff;
+  }
+
+  .mobile-nav-btn:active {
+    color: rgba(255, 255, 255, 0.8);
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
   }
 }
