@@ -248,6 +248,7 @@ function App() {
   };
 
   const [selectedAgent, setSelectedAgent] = useState(getInitialAgent);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [subscriberId, setSubscriberId] = useState("");
   const [allAgentMessages, setAllAgentMessages] = useState({}); // per-agent chat history
   const [loading, setLoading] = useState(false);
@@ -306,6 +307,7 @@ function App() {
   const handleSelectAgent = (agent) => {
     setSelectedAgent(agent);
     setSubscriberId("");
+    setIsMobileMenuOpen(false); // close mobile sidebar on agent select
 
     // Update URL path without reloading page
     const code = REVERSE_AGENT_PATH_MAP[agent];
@@ -367,6 +369,7 @@ function App() {
     // Section 1 — API Data: fully flatten all nested objects into individual rows
     if (api && typeof api === "object") {
       for (const [k, v] of Object.entries(api)) {
+
         if (v === null || v === undefined) {
           rows.push({ key: k, value: "N/A" });
         } else if (typeof v === "object" && !Array.isArray(v)) {
@@ -549,10 +552,26 @@ function App() {
 
           // If JSON parse failed or didn't populate it, use aggressive text cleanup
           if (!customerSummary) {
+            // Helper: convert SNAKE_CASE or snake_case to Title Case
+            const toTitleCase = (str) =>
+              str.toLowerCase().replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+
             customerSummary = rawSummary
+              // Replace literal \n (backslash-n) with a real newline BEFORE stripping backslashes
+              .replace(/\\n/g, "\n")
+              // Now strip remaining special chars
               .replace(/[{}"\\]/g, "")
+              // Remove leftover section keys
               .replace(/(?:^|\n)\s*(?:summary|next_steps|customer_output)\s*:/g, "")
-              .replace(/\n+/g, " ")
+              // Convert comma-separated metadata "key: ALL_CAPS_VALUE" into newline-separated
+              // beautiful readable lines e.g. "Status: Not Healthy\nDecision Code: Open Fault User"
+              .replace(/,?\s*(\w+):\s*([A-Z][A-Z_]+)(?=\s*,|\s*$)/g, (match, key, val) => {
+                return `\n${toTitleCase(key)}: ${toTitleCase(val)}`;
+              })
+              // Collapse leftover commas
+              .replace(/,\s*,/g, "")
+              .replace(/^\s*,|,\s*$/g, "")
+              .replace(/\n{3,}/g, "\n\n")
               .trim();
           }
         } else if (typeof rawSummary === "object") {
@@ -674,10 +693,23 @@ function App() {
       // A valid response has rawApiData as a non-empty object with real data keys.
       // An invalid/not-found response is null, empty, or contains only error/status metadata.
       const ERROR_ONLY_KEYS = new Set(["error", "status", "message", "errorCode", "errorMessage"]);
+      
+      // A valid response must contain at least one real identifier or data field (not just empty VAS placeholder structures)
+      const hasIdentifier = rawApiData && (
+        rawApiData.subscriberId ||
+        rawApiData.subscriber_id ||
+        rawApiData.customer_id ||
+        rawApiData.NMS_service_port_status ||
+        rawApiData.nms_service_port_status ||
+        rawApiData.email ||
+        rawApiData.phone
+      );
+
       const hasRealData = rawApiData &&
                           typeof rawApiData === "object" &&
                           Object.keys(rawApiData).length > 0 &&
-                          Object.keys(rawApiData).some(k => !ERROR_ONLY_KEYS.has(k));
+                          Object.keys(rawApiData).some(k => !ERROR_ONLY_KEYS.has(k)) &&
+                          !!hasIdentifier;
 
       // Also check if the API explicitly returned an error status
       const apiHasError = rawApiData &&
@@ -927,7 +959,33 @@ function App() {
 
   const renderMessageContent = (msg) => {
     if (!msg || !msg.content) return null;
-    const content = msg.content;
+
+    // Fix literal \n escape sequences that backend sometimes sends as text
+    let content = msg.content.replace(/\\n/g, "\n");
+
+    // Clean up dangling ** markers (e.g. "** " at the end or "**customer_output**")
+    // First render actual bold markdown, then strip any leftover asterisks
+    const renderContent = (text) => {
+      // Replace literal \n with actual newline just in case
+      let html = text.replace(/\\n/g, "\n");
+      
+      // Clean up spaces around colons (e.g. "Subscriber ID : 94113627500" -> "Subscriber ID: 94113627500")
+      html = html.replace(/\s+:\s+/g, ": ");
+      
+      // Collapse multiple consecutive spaces (excluding newlines)
+      html = html.replace(/[ \t]+/g, " ");
+
+      // Highlight subscriber/customer IDs (e.g. ACC060859917, 94113627500)
+      html = html.replace(/\b(ACC\d+|\d{10,})\b/g, '<span class="sub-id-highlight">$1</span>');
+
+      // Render **bold** markdown
+      html = html.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
+      // Remove any leftover dangling ** markers
+      html = html.replace(/\*\*/g, "");
+      // Render [text](url) links
+      html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+      return html;
+    };
 
     if (msg.isEmailAgent) {
       return (
@@ -936,7 +994,7 @@ function App() {
             <div
               key={i}
               className="message-line"
-              dangerouslySetInnerHTML={{ __html: formatMarkdownToHTML(line) }}
+              dangerouslySetInnerHTML={{ __html: renderContent(line) }}
             />
           ))}
         </div>
@@ -946,22 +1004,22 @@ function App() {
     // Check if this is a final summary message
     const isSummary = content.includes("analysis complete") || content.includes("💡");
 
-    const sections = content.split(/\s*,\s*/).map(s => s.trim()).filter(Boolean);
+    // Split on newlines only — NOT commas, which breaks normal sentences
+    const lines = content.split("\n").map(s => s.trim()).filter(Boolean);
 
     return (
       <div className={isSummary ? "summary-container" : ""}>
-        {sections.map((section, idx) => {
-          const subIdRegex = /(ACC\d+)/g;
-          const parts = section.split(subIdRegex);
+        {lines.map((line, idx) => {
+          const subIdRegex = /(ACC\d+|\d{10,})/g;
+          const parts = line.split(subIdRegex);
           return (
-            <div key={idx} className="message-line">
-              {parts.map((part, i) => {
-                if (subIdRegex.test(part)) {
-                  return <strong key={i} className="sub-id-highlight">{part}</strong>;
-                }
-                return part;
-              })}
-            </div>
+            <div
+              key={idx}
+              className="message-line"
+              dangerouslySetInnerHTML={{
+                __html: renderContent(line)
+              }}
+            />
           );
         })}
       </div>
@@ -985,9 +1043,14 @@ function App() {
       }}
     >
 
+      {/* ── Mobile Overlay ─────────────────────────────────────────── */}
+      {isMobileMenuOpen && (
+        <div className="mobile-overlay" onClick={() => setIsMobileMenuOpen(false)}></div>
+      )}
+
       {/* ── Sidebar ───────────────────────────────────────────────────── */}
-      <div className="sidebar">
-        <div className="logo">Blitz AI</div>
+      <div className={`sidebar ${isMobileMenuOpen ? 'mobile-open' : ''}`}>
+        <div className="logo">Blitz Ai</div>
 
         <h2>Agent Selector</h2>
 
@@ -1008,16 +1071,55 @@ function App() {
           <>
             {/* Dynamic header */}
             <div className="chat-header centered-header">
+              <button className="mobile-menu-btn" onClick={() => setIsMobileMenuOpen(true)}>
+                <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="3" y1="6" x2="21" y2="6"></line>
+                  <line x1="3" y1="12" x2="21" y2="12"></line>
+                  <line x1="3" y1="18" x2="21" y2="18"></line>
+                </svg>
+              </button>
               {isEmailAgentSelected
                 ? "BACKOFFICE EMAIL"
                 : isNonImplemented
                   ? selectedAgent.toUpperCase()
-                  : "Technical Support Assistant"}
+                  : "TECHNICAL SUPPORT ASSISTANT"}
             </div>
 
             {/* Non-implemented agents: blank body, no chat UI */}
             {isNonImplemented ? (
-              <div className="chat-box blank-chat-box"></div>
+              <div className="agent-empty-state">
+                <div className="agent-empty-icon coming-soon-icon">
+                  {selectedAgent === "Usage Agent" ? (
+                    <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                      <line x1="3" y1="9" x2="21" y2="9"></line>
+                      <line x1="9" y1="21" x2="9" y2="9"></line>
+                    </svg>
+                  ) : (
+                    <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="5"></circle>
+                      <line x1="12" y1="1" x2="12" y2="3"></line>
+                      <line x1="12" y1="21" x2="12" y2="23"></line>
+                      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                      <line x1="1" y1="12" x2="3" y2="12"></line>
+                      <line x1="21" y1="12" x2="23" y2="12"></line>
+                      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                    </svg>
+                  )}
+                </div>
+                <h2 className="agent-empty-title">{selectedAgent}</h2>
+                <p className="agent-empty-subtitle">This agent is currently under development and will be available soon.</p>
+                <div className="coming-soon-badge">COMING SOON</div>
+                <button className="go-to-email-btn" onClick={() => handleSelectAgent("Email Solution Agent")}>
+                  <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                    <polyline points="22,6 12,13 2,6"></polyline>
+                  </svg>
+                  Go to Email Agent
+                </button>
+              </div>
             ) : (
               <>
                 {/* Chat messages area */}

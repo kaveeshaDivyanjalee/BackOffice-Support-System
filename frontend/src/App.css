@@ -264,6 +264,7 @@ body {
 
 .message-line {
   line-height: 1.5;
+  text-align: justify;
 }
 
 .sub-id-highlight {
@@ -1313,4 +1314,157 @@ details.chat-tech-details .tech-data {
   max-width: 420px;
   line-height: 1.6;
   margin: 0;
+}
+
+.agent-empty-icon.coming-soon-icon {
+  background: linear-gradient(135deg, #475569, #1e293b);
+  box-shadow: 0 12px 30px rgba(71, 85, 105, 0.3);
+}
+
+.coming-soon-badge {
+  background-color: #f1f5f9;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 6px 14px;
+  border-radius: 20px;
+  margin: 16px 0 24px;
+  letter-spacing: 1px;
+}
+
+.go-to-email-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background-color: var(--slt-dark);
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 24px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 4px 12px rgba(0, 26, 51, 0.2);
+}
+
+.go-to-email-btn:hover {
+  background-color: var(--slt-blue);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 26, 51, 0.3);
+}
+
+.go-to-email-btn svg {
+  width: 18px;
+  height: 18px;
+  stroke: white;
+}
+
+/* ─── Mobile Responsive Styles ─────────────────────────────────────────────── */
+
+/* Hide the hamburger button on desktop */
+.mobile-menu-btn {
+  display: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px;
+  color: var(--slt-dark);
+  border-radius: 8px;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.mobile-menu-btn:hover {
+  background: rgba(0, 59, 115, 0.08);
+}
+
+/* Mobile overlay (dark backdrop) */
+.mobile-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 99;
+}
+
+@media (max-width: 768px) {
+
+  /* Show hamburger button on mobile */
+  .mobile-menu-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Show overlay on mobile */
+  .mobile-overlay {
+    display: block;
+  }
+
+  /* Container becomes single column */
+  .container {
+    grid-template-columns: 1fr !important;
+    position: relative;
+  }
+
+  /* Sidebar slides in from the left */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: -260px;
+    height: 100%;
+    width: 240px;
+    z-index: 100;
+    transition: left 0.3s ease;
+    box-shadow: none;
+  }
+
+  /* Sidebar visible when mobile-open class is added */
+  .sidebar.mobile-open {
+    left: 0;
+    box-shadow: 4px 0 20px rgba(0, 0, 0, 0.3);
+  }
+
+  /* Chat section takes full width */
+  .chat-section {
+    width: 100%;
+  }
+
+  /* Chat header shows hamburger on left */
+  .chat-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+  }
+
+  /* Tech panel goes below chat on mobile */
+  .tech-panel {
+    width: 100% !important;
+    max-height: 50vh;
+    overflow-y: auto;
+    border-left: none;
+    border-top: 1px solid var(--border-subtle);
+  }
+
+  /* Resizer hidden on mobile */
+  .resizer {
+    display: none;
+  }
+
+  /* Input area full width on mobile */
+  .input-area {
+    padding: 10px 12px;
+  }
+
+  /* Tech dashboard stacks vertically on mobile */
+  .tech-dashboard {
+    flex-direction: column;
+  }
+
+  .tech-column {
+    width: 100%;
+  }
 }
