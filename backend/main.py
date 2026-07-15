@@ -37,6 +37,12 @@ N8N_WEBHOOK_URL = os.getenv(
 )
 USE_TEST_MODE = os.getenv("USE_TEST_MODE", "false").lower() == "true"
 
+# Usage Agent n8n webhook URL (cloud n8n instance)
+USAGE_N8N_WEBHOOK_URL = os.getenv(
+    "USAGE_N8N_WEBHOOK_URL",
+    "https://sltrnddigitallab.app.n8n.cloud/webhook/891a401b-46cf-4c67-b3d6-f0eb128bbee7"
+)
+
 class SupportQuery(BaseModel):
     agent: str
     subscriber_id: str
@@ -46,6 +52,10 @@ class EmailChatRequest(BaseModel):
     message: str
     user_id: str = "020601"
     thread_id: str = "default_thread"
+
+class UsageChatRequest(BaseModel):
+    query: str
+    session_id: str = "default"
 
 @app.post("/email-chat")
 def handle_email_chat(request: EmailChatRequest):
@@ -65,6 +75,44 @@ def handle_email_chat(request: EmailChatRequest):
     except Exception as e:
         print(f"Email agent error: {str(e)}")
         return {"error": str(e)}
+
+@app.post("/usage-chat")
+def handle_usage_chat(request: UsageChatRequest):
+    try:
+        print(f"Usage agent request: {request.model_dump()}")
+        print(f"Usage N8N URL: {USAGE_N8N_WEBHOOK_URL}")
+
+        response = requests.post(
+            USAGE_N8N_WEBHOOK_URL,
+            json={"query": request.query, "session_id": request.session_id},
+            timeout=120
+        )
+
+        print(f"Usage N8N HTTP Status: {response.status_code}")
+        print(f"Usage N8N Raw Response: {response.text[:500]}")
+
+        response.raise_for_status()
+
+        if response.text.strip():
+            n8n_data = response.json()
+        else:
+            return {"error": "n8n returned an empty response. Make sure the workflow is active."}
+
+        # Unwrap if n8n returns a list
+        if isinstance(n8n_data, list):
+            n8n_data = n8n_data[0] if len(n8n_data) > 0 else {}
+
+        print(f"Usage N8N parsed response: {json.dumps(n8n_data, indent=2)[:1000]}")
+        return n8n_data
+
+    except requests.exceptions.ConnectionError:
+        return {"error": f"Cannot connect to n8n at {USAGE_N8N_WEBHOOK_URL}. Is your local n8n running?"}
+    except requests.exceptions.HTTPError as e:
+        return {"error": f"n8n returned HTTP {e.response.status_code}. Check that the workflow is Active (not just saved)."}
+    except Exception as e:
+        print(f"Usage agent error: {str(e)}")
+        return {"error": str(e)}
+
 
 @app.post("/support-query")
 def handle_support(query: SupportQuery):
@@ -104,7 +152,7 @@ def handle_support(query: SupportQuery):
         response = requests.post(
             N8N_WEBHOOK_URL,
             json=payload,
-            timeout=120
+            timeout=300
         )
 
         print(f"N8N HTTP Status: {response.status_code}")

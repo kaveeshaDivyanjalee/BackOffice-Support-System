@@ -260,7 +260,15 @@ function App() {
   const [apiData, setApiData] = useState(null);      // raw HTTP node data
   const [devOutput, setDevOutput] = useState(null);      // parsed developer_output
 
+  // ── Usage Agent dedicated state ──────────────────────────────────────────
+  const [usageMessages, setUsageMessages] = useState([]);
+  const [usageInput, setUsageInput] = useState("");
+  const [usageLoading, setUsageLoading] = useState(false);
+  const [usageRawApiData, setUsageRawApiData] = useState(null);
+  const [usageApiType, setUsageApiType] = useState(null); // "dashboard" | "protocol"
+
   const messagesEndRef = useRef(null);
+  const usageMessagesEndRef = useRef(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -270,8 +278,18 @@ function App() {
   const chatMessages = allAgentMessages[selectedAgent] || [];
 
   useEffect(() => {
-    scrollToBottom();
+    const timer = setTimeout(() => {
+      scrollToBottom();
+    }, 80);
+    return () => clearTimeout(timer);
   }, [chatMessages, loading]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      usageMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [usageMessages, usageLoading]);
 
   useEffect(() => {
     const handlePopState = () => {
@@ -393,17 +411,31 @@ function App() {
             rows.push({ key: k, value: null, isSection: true }); // section header
             for (const [sk, sv] of Object.entries(v)) {
               if (Array.isArray(sv)) {
-                // Array items (e.g. usageDetails) — each element on own row
-                sv.forEach((item, idx) => {
-                  if (typeof item === "object") {
-                    rows.push({ key: sk, value: null, isSection: true, isSubSection: true });
-                    for (const [ik, iv] of Object.entries(item)) {
-                      rows.push({ key: ik, value: String(iv ?? "N/A"), isIndented: true, isDoubleIndented: true });
+                if (sv.length > 0) {
+                  rows.push({ key: sk, value: null, isSection: true, isSubSection: true });
+                  sv.forEach((item, idx) => {
+                    if (typeof item === "object") {
+                      if (item.protocol) {
+                        // Has protocol field — show as sub-header
+                        rows.push({ key: item.protocol, value: null, isItemHeader: true, isIndented: true });
+                        for (const [ik, iv] of Object.entries(item)) {
+                          if (ik !== "protocol") {
+                            rows.push({ key: `  ${ik}`, value: String(iv ?? "N/A"), isDoubleIndented: true });
+                          }
+                        }
+                      } else {
+                        // No protocol — just expand fields with indent (no numbered header)
+                        for (const [ik, iv] of Object.entries(item)) {
+                          rows.push({ key: `  ${ik}`, value: String(iv ?? "N/A"), isDoubleIndented: true });
+                        }
+                      }
+                    } else {
+                      rows.push({ key: `  ${idx + 1}`, value: String(item ?? "N/A"), isDoubleIndented: true });
                     }
-                  } else {
-                    rows.push({ key: sk, value: String(item ?? "N/A"), isIndented: true });
-                  }
-                });
+                  });
+                } else {
+                  rows.push({ key: sk, value: "Empty", isIndented: true });
+                }
               } else if (typeof sv === "object" && sv !== null) {
                 rows.push({ key: `  ${sk}`, value: formatObjectFriendly(sk, sv), isIndented: true });
               } else {
@@ -412,7 +444,21 @@ function App() {
             }
           }
         } else if (Array.isArray(v)) {
-          rows.push({ key: k, value: v.join(", ") });
+          if (v.length > 0 && typeof v[0] === "object") {
+            // Array of objects at the root level (e.g. total, download, upload lists in Protocol Usage)
+            rows.push({ key: k, value: null, isSection: true });
+            v.forEach((item, idx) => {
+              const itemTitle = item.protocol ? item.protocol : `[${idx + 1}]`;
+              rows.push({ key: itemTitle, value: null, isSection: true, isSubSection: true });
+              for (const [ik, iv] of Object.entries(item)) {
+                if (ik !== "protocol") {
+                  rows.push({ key: ik, value: String(iv ?? "N/A"), isIndented: true, isDoubleIndented: true });
+                }
+              }
+            });
+          } else {
+            rows.push({ key: k, value: v.join(", ") });
+          }
         } else {
           rows.push({ key: k, value: String(v) });
         }
@@ -705,7 +751,7 @@ function App() {
       // A valid response has rawApiData as a non-empty object with real data keys.
       // An invalid/not-found response is null, empty, or contains only error/status metadata.
       const ERROR_ONLY_KEYS = new Set(["error", "status", "message", "errorCode", "errorMessage"]);
-      
+
       // A valid response must contain at least one real identifier or data field (not just empty VAS placeholder structures)
       const hasIdentifier = rawApiData && (
         rawApiData.subscriberId ||
@@ -718,16 +764,16 @@ function App() {
       );
 
       const hasRealData = rawApiData &&
-                          typeof rawApiData === "object" &&
-                          Object.keys(rawApiData).length > 0 &&
-                          Object.keys(rawApiData).some(k => !ERROR_ONLY_KEYS.has(k)) &&
-                          !!hasIdentifier;
+        typeof rawApiData === "object" &&
+        Object.keys(rawApiData).length > 0 &&
+        Object.keys(rawApiData).some(k => !ERROR_ONLY_KEYS.has(k)) &&
+        !!hasIdentifier;
 
       // Also check if the API explicitly returned an error status
       const apiHasError = rawApiData &&
-                          (rawApiData.error || 
-                           (rawApiData.status && String(rawApiData.status).toLowerCase().includes("error")) ||
-                           (rawApiData.errorCode && String(rawApiData.errorCode) !== "0"));
+        (rawApiData.error ||
+          (rawApiData.status && String(rawApiData.status).toLowerCase().includes("error")) ||
+          (rawApiData.errorCode && String(rawApiData.errorCode) !== "0"));
 
       if (!hasRealData || apiHasError) {
         // Clear technical data so the Tech Panel does not appear
@@ -980,10 +1026,10 @@ function App() {
     const renderContent = (text) => {
       // Replace literal \n with actual newline just in case
       let html = text.replace(/\\n/g, "\n");
-      
+
       // Clean up spaces around colons (e.g. "Subscriber ID : 94113627500" -> "Subscriber ID: 94113627500")
       html = html.replace(/\s+:\s+/g, ": ");
-      
+
       // Collapse multiple consecutive spaces (excluding newlines)
       html = html.replace(/[ \t]+/g, " ");
 
@@ -996,6 +1042,11 @@ function App() {
       html = html.replace(/\*\*/g, "");
       // Render [text](url) links
       html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+      
+      // Bold lines ending with a colon (:)
+      if (text.trim().endsWith(":")) {
+        html = `<strong>${html}</strong>`;
+      }
       return html;
     };
 
@@ -1038,12 +1089,192 @@ function App() {
     );
   };
 
+  // ── Usage Agent: Markdown renderer ──────────────────────────────────────
+  const renderMarkdown = (text) => {
+    if (!text) return null;
+    const lines = text.split("\n");
+    const elements = [];
+    let tableBuffer = [];
+    let inTable = false;
+    let key = 0;
+
+    const flushTable = () => {
+      if (tableBuffer.length < 2) {
+        tableBuffer.forEach(l => elements.push(<p key={key++} className="usage-md-p">{l}</p>));
+        tableBuffer = [];
+        return;
+      }
+      const parseCells = (row) => {
+        const cells = row.split("|").map(c => c.trim());
+        if (cells.length > 0 && cells[0] === "") cells.shift();
+        if (cells.length > 0 && cells[cells.length - 1] === "") cells.pop();
+        return cells;
+      };
+
+      const headerCells = parseCells(tableBuffer[0]);
+      
+      // Row index 1 is the separator (---|---), skip it
+      const dataRows = tableBuffer.slice(2).map(row => parseCells(row)).filter(r => r.length > 0);
+
+      elements.push(
+        <div key={key++} className="usage-table-wrapper">
+          <table className="usage-table">
+            <thead>
+              <tr>{headerCells.map((h, i) => <th key={i}>{h}</th>)}</tr>
+            </thead>
+            <tbody>
+              {dataRows.map((row, ri) => (
+                <tr key={ri}>
+                  {row.map((cell, ci) => <td key={ci}>{cell || "-"}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+      tableBuffer = [];
+    };
+
+    const parseInline = (str) => {
+      // Bold **text**
+      let html = str.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                    .replace(/`(.*?)`/g, '<code>$1</code>');
+      
+      // Bold lines ending with a colon (:)
+      if (str.trim().endsWith(":")) {
+        html = `<strong>${html}</strong>`;
+      }
+      return html;
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+
+      // Detect table row
+      if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
+        inTable = true;
+        tableBuffer.push(trimmed);
+        continue;
+      } else if (inTable) {
+        flushTable();
+        inTable = false;
+      }
+
+      if (!trimmed) {
+        elements.push(<div key={key++} className="usage-md-spacer" />);
+        continue;
+      }
+      if (trimmed.startsWith("### ")) {
+        elements.push(<h3 key={key++} className="usage-md-h3" dangerouslySetInnerHTML={{ __html: parseInline(trimmed.slice(4)) }} />);
+      } else if (trimmed.startsWith("## ")) {
+        elements.push(<h2 key={key++} className="usage-md-h2" dangerouslySetInnerHTML={{ __html: parseInline(trimmed.slice(3)) }} />);
+      } else if (trimmed.startsWith("# ")) {
+        elements.push(<h1 key={key++} className="usage-md-h1" dangerouslySetInnerHTML={{ __html: parseInline(trimmed.slice(2)) }} />);
+      } else if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+        elements.push(<li key={key++} className="usage-md-li" dangerouslySetInnerHTML={{ __html: parseInline(trimmed.slice(2)) }} />);
+      } else {
+        elements.push(<p key={key++} className="usage-md-p" dangerouslySetInnerHTML={{ __html: parseInline(trimmed) }} />);
+      }
+    }
+    if (inTable) flushTable();
+    return elements;
+  };
+
+  // ── Usage Agent: Send message ─────────────────────────────────────────────
+  const handleUsageSubmit = async () => {
+    const query = usageInput.trim();
+    if (!query) return;
+    setUsageInput("");
+    setUsageMessages(prev => [...prev, { role: "user", content: query }]);
+    setUsageLoading(true);
+    setUsageRawApiData(null);
+    setUsageApiType(null);
+
+    try {
+      const response = await fetch(getApiUrl("/usage-chat"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query }),
+      });
+      const data = await response.json();
+
+      if (data.error) {
+        setUsageMessages(prev => [...prev, { role: "assistant", content: `❌ ${data.error}` }]);
+        return;
+      }
+
+      // ai_chat_response is the markdown text from the Code node
+      const aiText = data.ai_chat_response || data.output || "No response received.";
+
+      // raw_api_data is the intermediateSteps array from the Code node
+      const steps = data.raw_api_data || [];
+      let rawJson = null;
+      let apiType = null;
+
+      // Find the last tool observation (the actual API response)
+      for (let i = steps.length - 1; i >= 0; i--) {
+        const step = steps[i];
+        const obs = step?.observation || step?.output || null;
+        const toolName = step?.action?.tool || "";
+        if (obs) {
+          let parsed = obs;
+          // Un-wrap stringified JSON up to 3 times
+          for (let attempt = 0; attempt < 3; attempt++) {
+            if (typeof parsed === "string") {
+              const trimmed = parsed.trim();
+              if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+                try {
+                  parsed = JSON.parse(trimmed);
+                } catch {
+                  break;
+                }
+              } else {
+                break;
+              }
+            } else {
+              break;
+            }
+          }
+          rawJson = parsed;
+          if (toolName.toLowerCase().includes("protocol")) apiType = "protocol";
+          else if (toolName.toLowerCase().includes("dashboard")) apiType = "dashboard";
+          else apiType = "api";
+          break;
+        }
+      }
+
+      // Unwrap single-element arrays
+      if (Array.isArray(rawJson) && rawJson.length === 1) {
+        rawJson = rawJson[0];
+      }
+      
+      // Unwrap single-key root objects (like "dashboardSummaryResponse") for cleaner UI display
+      if (rawJson && typeof rawJson === "object" && !Array.isArray(rawJson)) {
+        const keys = Object.keys(rawJson);
+        if (keys.length === 1 && typeof rawJson[keys[0]] === "object" && !Array.isArray(rawJson[keys[0]])) {
+          rawJson = rawJson[keys[0]];
+        }
+      }
+
+      setUsageRawApiData(rawJson);
+      setUsageApiType(apiType);
+      setUsageMessages(prev => [...prev, { role: "assistant", content: aiText, rawJson, apiType, techDetails: buildTechRows(rawJson, null) }]);
+    } catch (err) {
+      setUsageMessages(prev => [...prev, { role: "assistant", content: `❌ Error: ${err.message}` }]);
+    } finally {
+      setUsageLoading(false);
+    }
+  };
+
   const isEmailAgentSelected = selectedAgent === "Email Solution Agent";
-  const NON_IMPLEMENTED = ["Main Agent", "Usage Agent"];
+  const NON_IMPLEMENTED = ["Main Agent"];
   const isNonImplemented = NON_IMPLEMENTED.includes(selectedAgent);
 
-  // Show Tech Panel only when it's not email, not non-implemented, and user entered subscriber ID (data is loaded or loading)
-  const showTechPanel = !isEmailAgentSelected && !isNonImplemented && (apiData !== null || devOutput !== null || loading);
+  // Show Tech Panel only when it's not email, not non-implemented, not usage agent, and user entered subscriber ID (data is loaded or loading)
+  const isUsageAgent = selectedAgent === "Usage Agent";
+  const showTechPanel = !isEmailAgentSelected && !isNonImplemented && !isUsageAgent && (apiData !== null || devOutput !== null || loading);
 
   return (
     <>
@@ -1061,279 +1292,458 @@ function App() {
         }}
       >
 
-      {/* ── Sidebar ───────────────────────────────────────────────────── */}
-      <div className={`sidebar ${isMobileMenuOpen ? 'mobile-open' : ''}`}>
-        <div className="logo">Blitz Ai</div>
+        {/* ── Sidebar ───────────────────────────────────────────────────── */}
+        <div className={`sidebar ${isMobileMenuOpen ? 'mobile-open' : ''}`}>
+          <div className="logo">Blitz Ai</div>
 
-        <h2>Agent Selector</h2>
+          <h2>Agent Selector</h2>
 
-        {agents.map((agent, index) => (
-          <div
-            key={index}
-            className={`agent-card ${selectedAgent === agent ? "selected" : ""}`}
-            onClick={() => handleSelectAgent(agent)}
-          >
-            {agent}
-          </div>
-        ))}
-      </div>
-
-      {/* ── Chat Section ──────────────────────────────────────────────── */}
-      <div className="chat-section">
-        {selectedAgent && (
-          <>
-            {/* Dynamic header */}
-            <div className="chat-header centered-header">
-              {/* Mobile-only branding */}
-              <span className="mobile-header-brand">Blitz Ai</span>
-              <button className="mobile-menu-btn" onClick={() => setIsMobileMenuOpen(true)}>
-                <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="3" y1="6" x2="21" y2="6"></line>
-                  <line x1="3" y1="12" x2="21" y2="12"></line>
-                  <line x1="3" y1="18" x2="21" y2="18"></line>
-                </svg>
-              </button>
-              <span className="header-agent-title">
-              {isEmailAgentSelected
-                ? "BACKOFFICE EMAIL"
-                : isNonImplemented
-                  ? selectedAgent.toUpperCase()
-                  : "TECHNICAL SUPPORT ASSISTANT"}
-              </span>
+          {agents.map((agent, index) => (
+            <div
+              key={index}
+              className={`agent-card ${selectedAgent === agent ? "selected" : ""}`}
+              onClick={() => handleSelectAgent(agent)}
+            >
+              {agent}
             </div>
+          ))}
+        </div>
 
-            {/* Non-implemented agents: blank body, no chat UI */}
-            {isNonImplemented ? (
-              <div className="agent-empty-state">
-                <div className="agent-empty-icon coming-soon-icon">
-                  {selectedAgent === "Usage Agent" ? (
-                    <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                      <line x1="3" y1="9" x2="21" y2="9"></line>
-                      <line x1="9" y1="21" x2="9" y2="9"></line>
-                    </svg>
-                  ) : (
-                    <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="12" cy="12" r="5"></circle>
-                      <line x1="12" y1="1" x2="12" y2="3"></line>
-                      <line x1="12" y1="21" x2="12" y2="23"></line>
-                      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-                      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-                      <line x1="1" y1="12" x2="3" y2="12"></line>
-                      <line x1="21" y1="12" x2="23" y2="12"></line>
-                      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-                      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-                    </svg>
+        {/* ── Chat Section ──────────────────────────────────────────────── */}
+        <div className="chat-section">
+          {selectedAgent && (
+            <>
+              {/* Dynamic header */}
+              <div className="chat-header centered-header">
+                {/* Mobile-only branding */}
+                <span className="mobile-header-brand">Blitz Ai</span>
+                <button className="mobile-menu-btn" onClick={() => setIsMobileMenuOpen(true)}>
+                  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="3" y1="6" x2="21" y2="6"></line>
+                    <line x1="3" y1="12" x2="21" y2="12"></line>
+                    <line x1="3" y1="18" x2="21" y2="18"></line>
+                  </svg>
+                </button>
+                <span className="header-agent-title">
+                  {isEmailAgentSelected
+                    ? "BACKOFFICE EMAIL"
+                    : selectedAgent === "Usage Agent"
+                      ? "USAGE AGENT"
+                      : isNonImplemented
+                        ? selectedAgent.toUpperCase()
+                        : "TECHNICAL SUPPORT ASSISTANT"}
+                </span>
+              </div>
+
+              {/* Non-implemented agents: blank body, no chat UI */}
+              {selectedAgent === "Usage Agent" ? (
+                /* ── Usage Agent: Split-pane Chat + Raw API Panel ── */
+                <div className="usage-layout">
+                  {/* Left: Chat Panel */}
+                  <div className="usage-chat-panel">
+                    <div className="usage-chat-box">
+                      {usageMessages.length === 0 && !usageLoading && (
+                        <div className="agent-empty-state">
+                          <div className="agent-empty-icon" style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #6366f1 100%)', boxShadow: '0 12px 30px rgba(59, 130, 246, 0.3)', borderRadius: '50%' }}>
+                            <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" stroke="currentColor" style={{ width: '36px', height: '36px', stroke: '#ffffff' }}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
+                            </svg>
+                          </div>
+                          <h2 className="agent-empty-title">Usage Agent</h2>
+                          <p className="agent-empty-subtitle">Ask anything about a subscriber's data usage.<br />Try: <em>"Show dashboard summary for 94113627500"</em></p>
+                        </div>
+                      )}
+                      {usageMessages.map((msg, idx) => {
+                        const isLatestMessageAndAssistant = idx === usageMessages.length - 1 && msg.role === "assistant";
+                        return (
+                          <div key={idx} className={`usage-message ${msg.role === "user" ? "usage-msg-user" : "usage-msg-assistant"}`}>
+                            <div className="usage-msg-bubble">
+                              {msg.role === "assistant" && (
+                                <div className="usage-msg-avatar">🤖</div>
+                              )}
+                              {msg.role === "user"
+                                ? <p className="usage-md-p">{msg.content}</p>
+                                : renderMarkdown(msg.content)
+                              }
+                            </div>
+                            {msg.techDetails && msg.techDetails.length > 0 && !isLatestMessageAndAssistant && (
+                              <details className="chat-tech-details" style={{ marginTop: '8px' }}>
+                                <summary style={{ fontWeight: '600' }}>
+                                  {msg.apiType === "dashboard" && "Dashboard Summary"}
+                                  {msg.apiType === "protocol" && "Protocol Usage"}
+                                  {msg.apiType === "api" && "API Response"}
+                                  {!msg.apiType && "View Technical Details"}
+                                </summary>
+                                <div className="tech-data">
+                                  {msg.techDetails.map((row, i) => {
+                                    if (row.isSection && !row.isSubSection) {
+                                      return (
+                                        <div key={i} className="tech-row tech-section-header">
+                                          <span className="tech-section-label">{row.key.replace(/_/g, " ").trim()}</span>
+                                        </div>
+                                      );
+                                    }
+                                    if (row.isSubSection) {
+                                      return (
+                                        <div key={i} className="tech-row tech-row-indented tech-subsection-header" style={{ gridTemplateColumns: '1fr' }}>
+                                          <span className="tech-subsection-label" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.key.replace(/_/g, " ").trim()}</span>
+                                        </div>
+                                      );
+                                    }
+                                    if (row.isItemHeader) {
+                                      return (
+                                        <div key={i} className="tech-row tech-row-indented" style={{ backgroundColor: '#e8edf8', borderTop: '2px solid #c7d2fe', borderBottom: '1px solid #c7d2fe', gridTemplateColumns: '1fr' }}>
+                                          <span className="tech-key" style={{ fontWeight: '700', color: '#3730a3', fontSize: '12.5px', letterSpacing: '0.2px', paddingLeft: '8px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                            ▸ {row.key.replace(/_/g, " ").trim()}
+                                          </span>
+                                        </div>
+                                      );
+                                    }
+                                    let rowClass = "tech-row";
+                                    if (row.isDoubleIndented) {
+                                      rowClass += " tech-row-double-indented";
+                                    } else if (row.isIndented) {
+                                      rowClass += " tech-row-indented";
+                                    }
+                                    return (
+                                      <div key={i} className={rowClass}>
+                                        <span className="tech-key">{row.key.replace(/_/g, " ").trim()}</span>
+                                        <span className={`tech-value ${statusColor(row.value)}`}>
+                                          {row.value}
+                                        </span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </details>
+                            )}
+                          </div>
+                        );
+                      })}
+                      {usageLoading && (
+                        <div className="usage-message usage-msg-assistant">
+                          <div className="usage-msg-bubble">
+                            <div className="usage-msg-avatar">🤖</div>
+                            <div className="typing"><span></span><span></span><span></span></div>
+                          </div>
+                        </div>
+                      )}
+                      <div ref={usageMessagesEndRef} />
+                    </div>
+                    {/* Input bar */}
+                    <div className="usage-input-row">
+                      <input
+                        type="text"
+                        className="usage-input"
+                        placeholder="Ask about a subscriber's usage..."
+                        value={usageInput}
+                        onChange={e => setUsageInput(e.target.value)}
+                        onKeyDown={e => e.key === "Enter" && handleUsageSubmit()}
+                      />
+                      <button className="usage-send-btn" onClick={handleUsageSubmit} title="Send">
+                        <svg viewBox="0 0 24 24" className="send-icon"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" /></svg>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Right: Structured API Details Panel — only shown after chat starts */}
+                  {usageRawApiData !== null && (
+                    <div className="usage-raw-panel">
+                      <div className="usage-raw-header">
+                        <span className="usage-raw-title" style={{ paddingLeft: '8px' }}>
+                          {usageApiType === "dashboard" && "Dashboard Summary"}
+                          {usageApiType === "protocol" && "Protocol Usage"}
+                          {usageApiType === "api" && "API Response"}
+                          {!usageApiType && "API Data Panel"}
+                        </span>
+                      </div>
+                      {usageRawApiData ? (
+                        <div style={{ flex: 1, overflowY: 'auto' }} className="tech-data">
+                          {buildTechRows(usageRawApiData, null).map((row, i) => {
+                            if (row.isSection && !row.isSubSection) {
+                              return (
+                                <div key={i} className="tech-row tech-section-header">
+                                  <span className="tech-section-label">{row.key.replace(/_/g, " ").trim()}</span>
+                                </div>
+                              );
+                            }
+                            if (row.isSubSection) {
+                              return (
+                                <div key={i} className="tech-row tech-row-indented tech-subsection-header" style={{ gridTemplateColumns: '1fr' }}>
+                                  <span className="tech-subsection-label" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.key.replace(/_/g, " ").trim()}</span>
+                                </div>
+                              );
+                            }
+                            if (row.isItemHeader) {
+                              // Protocol name: styled as a mini sub-header, indented
+                              return (
+                                <div key={i} className="tech-row tech-row-indented" style={{ backgroundColor: '#e8edf8', borderTop: '2px solid #c7d2fe', borderBottom: '1px solid #c7d2fe', gridTemplateColumns: '1fr' }}>
+                                  <span className="tech-key" style={{ fontWeight: '700', color: '#3730a3', fontSize: '12.5px', letterSpacing: '0.2px', paddingLeft: '8px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                    ▸ {row.key.replace(/_/g, " ").trim()}
+                                  </span>
+                                </div>
+                              );
+                            }
+
+                            let rowClass = "tech-row";
+                            if (row.isDoubleIndented) {
+                              rowClass += " tech-row-double-indented";
+                            } else if (row.isIndented) {
+                              rowClass += " tech-row-indented";
+                            }
+
+                            return (
+                              <div key={i} className={rowClass}>
+                                <span className="tech-key">{row.key.replace(/_/g, " ").trim()}</span>
+                                <span className={`tech-value ${statusColor(row.value)}`}>
+                                  {row.value}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="usage-raw-empty">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5" />
+                          </svg>
+                          <p>Raw API data will appear here<br />after you send a query.</p>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
-                <h2 className="agent-empty-title">{selectedAgent}</h2>
-                <p className="agent-empty-subtitle">This agent is currently under development and will be available soon.</p>
-                <div className="coming-soon-badge">COMING SOON</div>
-                <button className="go-to-email-btn" onClick={() => handleSelectAgent("Email Solution Agent")}>
-                  <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
-                    <polyline points="22,6 12,13 2,6"></polyline>
-                  </svg>
-                  Go to Email Agent
-                </button>
-              </div>
-            ) : (
-              <>
-                {/* Chat messages area */}
-                <div className={`chat-box ${isEmailAgentSelected ? "email-chat-box" : ""}`}>
-                  {selectedAgent === "Configuration Agent" && chatMessages.length === 0 ? (
-                    <div className="agent-empty-state">
-                      <div className="agent-empty-icon config-icon">
-                        <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
-                        </svg>
+              ) : isNonImplemented ? (
+                <div className="agent-empty-state">
+                  <div className="agent-empty-icon coming-soon-icon">
+                    {selectedAgent === "Usage Agent" ? (
+                      <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                        <line x1="3" y1="9" x2="21" y2="9"></line>
+                        <line x1="9" y1="21" x2="9" y2="9"></line>
+                      </svg>
+                    ) : (
+                      <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="5"></circle>
+                        <line x1="12" y1="1" x2="12" y2="3"></line>
+                        <line x1="12" y1="21" x2="12" y2="23"></line>
+                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                        <line x1="1" y1="12" x2="3" y2="12"></line>
+                        <line x1="21" y1="12" x2="23" y2="12"></line>
+                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                      </svg>
+                    )}
+                  </div>
+                  <h2 className="agent-empty-title">{selectedAgent}</h2>
+                  <p className="agent-empty-subtitle">This agent is currently under development and will be available soon.</p>
+                  <div className="coming-soon-badge">COMING SOON</div>
+                  <button className="go-to-email-btn" onClick={() => handleSelectAgent("Email Solution Agent")}>
+                    <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                      <polyline points="22,6 12,13 2,6"></polyline>
+                    </svg>
+                    Go to Email Agent
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {/* Chat messages area */}
+                  <div className={`chat-box ${isEmailAgentSelected ? "email-chat-box" : ""}`}>
+                    {selectedAgent === "Configuration Agent" && chatMessages.length === 0 ? (
+                      <div className="agent-empty-state">
+                        <div className="agent-empty-icon config-icon">
+                          <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+                          </svg>
+                        </div>
+                        <h2 className="agent-empty-title">Configuration Diagnostics</h2>
+                        <p className="agent-empty-subtitle">Enter a Subscriber ID or Customer ID to begin the diagnostic analysis.</p>
                       </div>
-                      <h2 className="agent-empty-title">Configuration Diagnostics</h2>
-                      <p className="agent-empty-subtitle">Enter a Subscriber ID or Customer ID to begin the diagnostic analysis.</p>
-                    </div>
-                  ) : isEmailAgentSelected && chatMessages.length === 0 ? (
-                    <div className="agent-empty-state">
-                      <div className="agent-empty-icon email-icon">
-                        <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
-                          <polyline points="22,6 12,13 2,6"></polyline>
-                        </svg>
+                    ) : isEmailAgentSelected && chatMessages.length === 0 ? (
+                      <div className="agent-empty-state">
+                        <div className="agent-empty-icon email-icon">
+                          <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                            <polyline points="22,6 12,13 2,6"></polyline>
+                          </svg>
+                        </div>
+                        <h2 className="agent-empty-title">Email Solution Assistant</h2>
+                        <p className="agent-empty-subtitle">Describe the customer's email issue. I'll analyze the symptoms and provide real-time troubleshooting steps.</p>
                       </div>
-                      <h2 className="agent-empty-title">Email Solution Assistant</h2>
-                      <p className="agent-empty-subtitle">Describe the customer's email issue. I'll analyze the symptoms and provide real-time troubleshooting steps.</p>
-                    </div>
-                  ) : (
-                    chatMessages.map((msg, index) => {
-                      const isLatestMessageAndAssistant = index === chatMessages.length - 1 && msg.role === "assistant";
+                    ) : (
+                      chatMessages.map((msg, index) => {
+                        const isLatestMessageAndAssistant = index === chatMessages.length - 1 && msg.role === "assistant";
 
-                      if (isEmailAgentSelected) {
-                        // Email Agent: Full-width rectangle card layout
-                        const isUser = msg.role === "user";
+                        if (isEmailAgentSelected) {
+                          // Email Agent: Full-width rectangle card layout
+                          const isUser = msg.role === "user";
+                          return (
+                            <div
+                              key={index}
+                              className={`email-msg-card ${isUser ? "email-msg-user" : "email-msg-assistant"}`}
+                            >
+                              <div className="email-msg-avatar">
+                                {isUser ? "👤" : "🤖"}
+                              </div>
+                              <div className="email-msg-text">
+                                {renderMessageContent(msg)}
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        // Other agents: original bubble layout
                         return (
                           <div
                             key={index}
-                            className={`email-msg-card ${isUser ? "email-msg-user" : "email-msg-assistant"}`}
+                            className={msg.role === "assistant" ? "message assistant" : "message user"}
                           >
-                            <div className="email-msg-avatar">
-                              {isUser ? "👤" : "🤖"}
+                            <div className="message-avatar">
+                              {msg.role === "user" ? "👤" : "🤖"}
                             </div>
-                            <div className="email-msg-text">
+                            <div className="message-content">
                               {renderMessageContent(msg)}
                             </div>
+
+                            {msg.workflow && msg.workflow.length > 0 && (
+                              <div className="workflow-section">
+                                <strong>⚙ Workflow Execution:</strong>
+                                <ul>
+                                  {msg.workflow.map((step, i) => (
+                                    <li key={i}>{step}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+
+                            {msg.techDetails && msg.techDetails.length > 0 && !isLatestMessageAndAssistant && (
+                              <details className="chat-tech-details">
+                                <summary>View Technical Details</summary>
+                                <div className="tech-data">
+                                  {msg.techDetails.map((row, i) => {
+                                    if (row.isSection && !row.isSubSection) {
+                                      return (
+                                        <div key={i} className="tech-row tech-section-header">
+                                          <span className="tech-section-label">{row.key.trim()}</span>
+                                        </div>
+                                      );
+                                    }
+                                    if (row.isSubSection) {
+                                      return (
+                                        <div key={i} className="tech-row tech-row-indented tech-subsection-header">
+                                          <span className="tech-subsection-label">{row.key.trim()}</span>
+                                        </div>
+                                      );
+                                    }
+                                    let rowClass = "tech-row";
+                                    if (row.isDoubleIndented) {
+                                      rowClass += " tech-row-double-indented";
+                                    } else if (row.isIndented) {
+                                      rowClass += " tech-row-indented";
+                                    }
+                                    return (
+                                      <div key={i} className={rowClass}>
+                                        <span className="tech-key">{row.key.trim()}</span>
+                                        <span className={`tech-value ${statusColor(row.value)}`}>
+                                          {row.value}
+                                        </span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </details>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+
+                    {loading && (
+                      <div className="message assistant">
+                        <div className="typing">
+                          <span></span><span></span><span></span>
+                        </div>
+                      </div>
+                    )}
+                    <div ref={messagesEndRef} />
+                  </div>
+
+                  {/* Chat input */}
+                  <div className="chat-input">
+                    <div className="chat-input-container">
+                      <input
+                        type="text"
+                        placeholder={isEmailAgentSelected ? "Type your message..." : "Enter Subscriber ID or Customer ID..."}
+                        value={subscriberId}
+                        onChange={(e) => setSubscriberId(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+                      />
+                      <button className="send-icon-btn" onClick={handleSubmit} title="Send Message">
+                        <svg viewBox="0 0 24 24" className="send-icon">
+                          <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* ── Resizer & Tech Panel — shown only when showTechPanel is true ── */}
+        {showTechPanel && (
+          <>
+            <div className="resizer" onMouseDown={startResizing} title="Drag to resize panel"></div>
+            <div className="tech-panel">
+              <h3>Technical Details</h3>
+
+              {techRows.length > 0 ? (
+                <>
+                  {renderTechDashboard()}
+                  <div className="tech-data">
+                    {techRows.map((row, i) => {
+                      if (row.isSection && !row.isSubSection) {
+                        return (
+                          <div key={i} className="tech-row tech-section-header">
+                            <span className="tech-section-label">{row.key.trim()}</span>
                           </div>
                         );
                       }
-
-                      // Other agents: original bubble layout
+                      if (row.isSubSection) {
+                        return (
+                          <div key={i} className="tech-row tech-row-indented tech-subsection-header">
+                            <span className="tech-subsection-label">{row.key.trim()}</span>
+                          </div>
+                        );
+                      }
+                      let rowClass = "tech-row";
+                      if (row.isDoubleIndented) {
+                        rowClass += " tech-row-double-indented";
+                      } else if (row.isIndented) {
+                        rowClass += " tech-row-indented";
+                      }
                       return (
-                        <div
-                          key={index}
-                          className={msg.role === "assistant" ? "message assistant" : "message user"}
-                        >
-                          <div className="message-avatar">
-                            {msg.role === "user" ? "👤" : "🤖"}
-                          </div>
-                          <div className="message-content">
-                            {renderMessageContent(msg)}
-                          </div>
-
-                          {msg.workflow && msg.workflow.length > 0 && (
-                            <div className="workflow-section">
-                              <strong>⚙ Workflow Execution:</strong>
-                              <ul>
-                                {msg.workflow.map((step, i) => (
-                                  <li key={i}>{step}</li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-
-                          {msg.techDetails && msg.techDetails.length > 0 && !isLatestMessageAndAssistant && (
-                            <details className="chat-tech-details">
-                              <summary>View Technical Details</summary>
-                              <div className="tech-data">
-                                {msg.techDetails.map((row, i) => {
-                                  if (row.isSection && !row.isSubSection) {
-                                    return (
-                                      <div key={i} className="tech-row tech-section-header">
-                                        <span className="tech-section-label">{row.key.trim()}</span>
-                                      </div>
-                                    );
-                                  }
-                                  if (row.isSubSection) {
-                                    return (
-                                      <div key={i} className="tech-row tech-row-indented tech-subsection-header">
-                                        <span className="tech-subsection-label">{row.key.trim()}</span>
-                                      </div>
-                                    );
-                                  }
-                                  let rowClass = "tech-row";
-                                  if (row.isDoubleIndented) {
-                                    rowClass += " tech-row-double-indented";
-                                  } else if (row.isIndented) {
-                                    rowClass += " tech-row-indented";
-                                  }
-                                  return (
-                                    <div key={i} className={rowClass}>
-                                      <span className="tech-key">{row.key.trim()}</span>
-                                      <span className={`tech-value ${statusColor(row.value)}`}>
-                                        {row.value}
-                                      </span>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </details>
-                          )}
+                        <div key={i} className={rowClass}>
+                          <span className="tech-key">{row.key.trim()}</span>
+                          <span className={`tech-value ${statusColor(row.value)}`}>
+                            {row.value}
+                          </span>
                         </div>
                       );
-                    })
-                  )}
-
-                  {loading && (
-                    <div className="message assistant">
-                      <div className="typing">
-                        <span></span><span></span><span></span>
-                      </div>
-                    </div>
-                  )}
-                  <div ref={messagesEndRef} />
-                </div>
-
-                {/* Chat input */}
-                <div className="chat-input">
-                  <div className="chat-input-container">
-                    <input
-                      type="text"
-                      placeholder={isEmailAgentSelected ? "Type your message..." : "Enter Subscriber ID or Customer ID..."}
-                      value={subscriberId}
-                      onChange={(e) => setSubscriberId(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
-                    />
-                    <button className="send-icon-btn" onClick={handleSubmit} title="Send Message">
-                      <svg viewBox="0 0 24 24" className="send-icon">
-                        <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
-                      </svg>
-                    </button>
+                    })}
                   </div>
-                </div>
-              </>
-            )}
+                </>
+              ) : (
+                <p className="no-data">No technical data yet.<br />Submit a query to see details.</p>
+              )}
+            </div>
           </>
         )}
+
       </div>
-
-      {/* ── Resizer & Tech Panel — shown only when showTechPanel is true ── */}
-      {showTechPanel && (
-        <>
-          <div className="resizer" onMouseDown={startResizing} title="Drag to resize panel"></div>
-          <div className="tech-panel">
-            <h3>Technical Details</h3>
-
-            {techRows.length > 0 ? (
-              <>
-                {renderTechDashboard()}
-                <div className="tech-data">
-                  {techRows.map((row, i) => {
-                    if (row.isSection && !row.isSubSection) {
-                      return (
-                        <div key={i} className="tech-row tech-section-header">
-                          <span className="tech-section-label">{row.key.trim()}</span>
-                        </div>
-                      );
-                    }
-                    if (row.isSubSection) {
-                      return (
-                        <div key={i} className="tech-row tech-row-indented tech-subsection-header">
-                          <span className="tech-subsection-label">{row.key.trim()}</span>
-                        </div>
-                      );
-                    }
-                    let rowClass = "tech-row";
-                    if (row.isDoubleIndented) {
-                      rowClass += " tech-row-double-indented";
-                    } else if (row.isIndented) {
-                      rowClass += " tech-row-indented";
-                    }
-                    return (
-                      <div key={i} className={rowClass}>
-                        <span className="tech-key">{row.key.trim()}</span>
-                        <span className={`tech-value ${statusColor(row.value)}`}>
-                          {row.value}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </>
-            ) : (
-              <p className="no-data">No technical data yet.<br />Submit a query to see details.</p>
-            )}
-          </div>
-        </>
-      )}
-
-    </div>
 
       {/* ── Mobile Bottom Navigation Bar (mobile only, hidden on desktop) ── */}
       <nav className="mobile-bottom-nav">
@@ -1341,27 +1751,27 @@ function App() {
           const icons = {
             "Main Agent": (
               <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-                <polyline points="9 22 9 12 15 12 15 22"/>
+                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                <polyline points="9 22 9 12 15 12 15 22" />
               </svg>
             ),
             "Usage Agent": (
               <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="18" y1="20" x2="18" y2="10"/>
-                <line x1="12" y1="20" x2="12" y2="4"/>
-                <line x1="6" y1="20" x2="6" y2="14"/>
+                <line x1="18" y1="20" x2="18" y2="10" />
+                <line x1="12" y1="20" x2="12" y2="4" />
+                <line x1="6" y1="20" x2="6" y2="14" />
               </svg>
             ),
             "Email Solution Agent": (
               <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
-                <polyline points="22,6 12,13 2,6"/>
+                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+                <polyline points="22,6 12,13 2,6" />
               </svg>
             ),
             "Configuration Agent": (
               <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="3"/>
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
               </svg>
             ),
           };
