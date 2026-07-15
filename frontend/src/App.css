@@ -103,8 +103,15 @@ body {
     padding-bottom: 24px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 10px;
+    text-align: center;
+    gap: 8px;
+  }
+
+  .sidebar-logo-icon {
+    height: 44px;
+    width: auto;
   }
 
   .sidebar h2 {
@@ -264,7 +271,7 @@ body {
 
 .message-line {
   line-height: 1.5;
-  text-align: justify;
+  text-align: left;
 }
 
 .sub-id-highlight {
@@ -642,6 +649,14 @@ details.chat-tech-details .tech-data {
   font-weight: 700;
   color: #0f172a;
   border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.mobile-tech-toggle-icon {
+  display: none;
+  /* Hidden on desktop */
 }
 
 /* ── Tech Dashboard (Dynamic vs Static) ──────────────────────────────────── */
@@ -1380,6 +1395,135 @@ details.chat-tech-details .tech-data {
   background: rgba(0, 59, 115, 0.08);
 }
 
+/* ─── Mobile Top Dropdown Navigation ────────────────────────────────────────── */
+
+/* Overlay that dims the page when dropdown is open */
+.mobile-dropdown-overlay {
+  display: none;
+}
+
+/* Dropdown panel — hidden on desktop */
+.mobile-top-dropdown {
+  display: none;
+}
+
+/* Hidden helper classes on desktop */
+.mobile-header-left,
+.mobile-header-left-wrap {
+  display: none;
+}
+
+.desktop-header-title {
+  display: block;
+}
+
+@media (max-width: 768px) {
+
+  /* Dim overlay behind the dropdown */
+  .mobile-dropdown-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.35);
+    z-index: 9997;
+    animation: fadeIn 0.15s ease;
+  }
+
+  /* Dropdown slides down from the top */
+  .mobile-top-dropdown {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(160deg, var(--slt-blue) 0%, var(--slt-dark) 100%);
+    z-index: 9998;
+    border-radius: 0 0 20px 20px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+    padding: 16px 12px 20px;
+    gap: 6px;
+    /* Hidden by default: moved offscreen upward */
+    transform: translateY(-110%);
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    pointer-events: none;
+  }
+
+  .mobile-top-dropdown.open {
+    transform: translateY(0);
+    pointer-events: auto;
+  }
+
+  /* Dropdown header label */
+  .mobile-top-dropdown::before {
+    content: "Select Agent";
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: rgba(255, 255, 255, 0.45);
+    padding: 0 8px 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    margin-bottom: 6px;
+  }
+
+  /* Each agent option in the dropdown */
+  .mobile-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+    padding: 14px 16px;
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 15px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.18s ease, color 0.18s ease;
+    -webkit-tap-highlight-color: transparent;
+    position: relative;
+  }
+
+  .mobile-dropdown-item:active {
+    background: rgba(255, 255, 255, 0.12);
+  }
+
+  .mobile-dropdown-item.active {
+    background: var(--primary);
+    border-color: var(--primary-light);
+    color: #ffffff;
+    box-shadow: 0 4px 16px rgba(59, 130, 246, 0.4);
+  }
+
+  /* Coloured dot indicator on the left */
+  .mobile-dropdown-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.3);
+    flex-shrink: 0;
+    transition: background 0.18s;
+  }
+
+  .mobile-dropdown-item.active .mobile-dropdown-dot {
+    background: #ffffff;
+  }
+
+  /* Checkmark icon pushed to the right edge */
+  .mobile-dropdown-check {
+    width: 18px;
+    height: 18px;
+    stroke: #ffffff;
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+}
+
 /* Mobile overlay (dark backdrop) */
 .mobile-overlay {
   display: none;
@@ -1396,19 +1540,20 @@ details.chat-tech-details .tech-data {
 
 @media (max-width: 768px) {
 
-  /* Show Blitz Ai branding on mobile */
+  /* Show Blitz.ai branding on mobile */
   .mobile-header-brand {
     display: block;
-    font-size: 18px;
+    font-size: 12px;
     font-weight: 800;
     color: var(--slt-dark);
     letter-spacing: -0.02em;
+    line-height: 1.1;
   }
 
-  /* Show the agent title text on mobile below 'Blitz Ai' */
+  /* Show the agent title text on mobile next to brand */
   .header-agent-title {
     display: block;
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 800;
     color: #1e3a8a;
     text-transform: uppercase;
@@ -1416,16 +1561,11 @@ details.chat-tech-details .tech-data {
     margin-top: 4px;
   }
 
-  /* Hide hamburger button on mobile — bottom nav handles navigation */
+  /* Show the hamburger button on mobile */
   .mobile-menu-btn {
-    display: none;
+    display: flex;
   }
 
-  /* Show overlay on mobile */
-  .mobile-overlay {
-    display: block;
-    z-index: 9998;
-  }
 
   /* Container becomes single column */
   .container {
@@ -1443,24 +1583,69 @@ details.chat-tech-details .tech-data {
     width: 100%;
   }
 
-  /* Chat header stacks Blitz Ai and agent name vertically on mobile */
+  /* Chat header: left=brand+agent title, right=hamburger on mobile */
   .chat-header {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between !important;
+    gap: 0;
+    padding: 10px 16px;
+    text-align: left;
+  }
+
+  /* Left block: stacked Blitz.ai + agent name */
+  .mobile-header-left-wrap {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .mobile-brand-container {
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center !important;
-    gap: 2px;
-    padding: 10px 16px;
-    text-align: center;
+    gap: 3px;
+  }
+
+  .mobile-logo-icon {
+    height: 24px;
+    width: auto;
+  }
+
+  /* Hide the desktop-only centred title on mobile */
+  .desktop-header-title {
+    display: none;
   }
 
   /* Tech panel goes below chat on mobile */
   .tech-panel {
     width: 100% !important;
-    max-height: 50vh;
-    overflow-y: auto;
     border-left: none;
     border-top: 1px solid var(--border-subtle);
+  }
+
+  .tech-panel h3 {
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .mobile-tech-toggle-icon {
+    display: block;
+    /* Show on mobile */
+    width: 20px;
+    height: 20px;
+    color: var(--primary);
+  }
+
+  .tech-panel.mobile-collapsed .tech-panel-content {
+    display: none;
+  }
+
+  .tech-panel.mobile-expanded .tech-panel-content {
+    display: block;
+    max-height: 50vh;
+    overflow-y: auto;
   }
 
   /* Resizer hidden on mobile */
@@ -1482,9 +1667,9 @@ details.chat-tech-details .tech-data {
     width: 100%;
   }
 
-  /* Add padding to chat section so content isn't hidden behind bottom nav */
+  /* Remove bottom padding — no bottom nav any more */
   .chat-section {
-    padding-bottom: 70px;
+    padding-bottom: 0;
   }
 }
 
@@ -1555,5 +1740,96 @@ details.chat-tech-details .tech-data {
     color: rgba(255, 255, 255, 0.8);
     background: rgba(255, 255, 255, 0.05);
     border-radius: 8px;
+  }
+}
+
+/* ─── Footer Styles ────────────────────────────────────────────────────────── */
+.app-footer {
+  width: 100%;
+  background: transparent;
+  border-top: none;
+  padding: 12px 24px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  box-sizing: border-box;
+}
+
+.footer-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.powered-by {
+  font-size: 10px;
+  font-weight: 600;
+  color: #94a3b8;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.footer-logo-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.footer-logo-img {
+  height: 20px;
+  width: auto;
+  object-fit: contain;
+}
+
+.footer-logo-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+  text-align: left;
+}
+
+.logo-slt-mobitel {
+  font-size: 4px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  margin-bottom: -1px;
+}
+
+.logo-slt {
+  color: #0076c0; /* Blue */
+}
+
+.logo-mobitel {
+  color: #43b02a; /* Green */
+}
+
+.logo-embryo {
+  font-size: 9px;
+  font-weight: 800;
+  color: #003B73; /* var(--slt-blue) */
+  letter-spacing: 0.02em;
+  margin-bottom: -2px;
+}
+
+.logo-innovation {
+  font-size: 3px;
+  font-weight: 800;
+  color: #003B73; /* var(--slt-blue) */
+  letter-spacing: 0.08em;
+  text-align: right;
+  text-transform: uppercase;
+}
+
+/* ─── Responsive Tech Panel Visibility ───────────────────────────────────── */
+@media (min-width: 769px) {
+  .mobile-only-tech {
+    display: none !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .desktop-only-tech {
+    display: none !important;
   }
 }

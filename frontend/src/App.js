@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from "react";
+import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import "./App.css";
 
 // ─── YAML-style text parser ────────────────────────────────────────────────
@@ -149,28 +149,7 @@ function extractWorkflow(text) {
   return [];
 }
 
-// ─── Render nested objects as flat rows for the Tech Panel ────────────────
-function flattenObj(obj, prefix = "") {
-  const rows = [];
-  if (obj === null || obj === undefined) return rows;
-  if (typeof obj !== "object" || Array.isArray(obj)) {
-    rows.push({ key: prefix, value: Array.isArray(obj) ? obj.join(", ") : String(obj ?? "N/A") });
-    return rows;
-  }
-  for (const [k, v] of Object.entries(obj)) {
-    const fullKey = prefix ? `${prefix}.${k}` : k;
-    if (v === null || v === undefined) {
-      rows.push({ key: fullKey, value: "N/A" });
-    } else if (Array.isArray(v)) {
-      rows.push({ key: fullKey, value: v.join(" → ") });
-    } else if (typeof v === "object") {
-      rows.push(...flattenObj(v, fullKey));
-    } else {
-      rows.push({ key: fullKey, value: String(v) });
-    }
-  }
-  return rows;
-}
+
 
 // ─── Format Object into a user-friendly string ──────────────────────────
 function formatObjectFriendly(key, obj) {
@@ -254,6 +233,7 @@ function App() {
 
   const [selectedAgent, setSelectedAgent] = useState(getInitialAgent);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isMobileTechPanelOpen, setIsMobileTechPanelOpen] = useState(false);
   const [subscriberId, setSubscriberId] = useState("");
   const [allAgentMessages, setAllAgentMessages] = useState({}); // per-agent chat history
   const [loading, setLoading] = useState(false);
@@ -267,7 +247,10 @@ function App() {
   };
 
   // Derived: messages for the currently selected agent
-  const chatMessages = allAgentMessages[selectedAgent] || [];
+  const chatMessages = useMemo(
+    () => allAgentMessages[selectedAgent] || [],
+    [allAgentMessages, selectedAgent]
+  );
 
   useEffect(() => {
     scrollToBottom();
@@ -680,7 +663,7 @@ function App() {
 
       const cleanStepText = (step) => {
         // Removes ANY quotes, braces, brackets, replaces underscores with spaces, and trims whitespace
-        return step.replace(/[\]}"'\[{]/g, "").replace(/_/g, " ").trim();
+        return step.replace(/[\][{}'"]/g, "").replace(/_/g, " ").trim();
       };
 
       for (const step of workflow) {
@@ -705,7 +688,7 @@ function App() {
       // A valid response has rawApiData as a non-empty object with real data keys.
       // An invalid/not-found response is null, empty, or contains only error/status metadata.
       const ERROR_ONLY_KEYS = new Set(["error", "status", "message", "errorCode", "errorMessage"]);
-      
+
       // A valid response must contain at least one real identifier or data field (not just empty VAS placeholder structures)
       const hasIdentifier = rawApiData && (
         rawApiData.subscriberId ||
@@ -718,16 +701,16 @@ function App() {
       );
 
       const hasRealData = rawApiData &&
-                          typeof rawApiData === "object" &&
-                          Object.keys(rawApiData).length > 0 &&
-                          Object.keys(rawApiData).some(k => !ERROR_ONLY_KEYS.has(k)) &&
-                          !!hasIdentifier;
+        typeof rawApiData === "object" &&
+        Object.keys(rawApiData).length > 0 &&
+        Object.keys(rawApiData).some(k => !ERROR_ONLY_KEYS.has(k)) &&
+        !!hasIdentifier;
 
       // Also check if the API explicitly returned an error status
       const apiHasError = rawApiData &&
-                          (rawApiData.error || 
-                           (rawApiData.status && String(rawApiData.status).toLowerCase().includes("error")) ||
-                           (rawApiData.errorCode && String(rawApiData.errorCode) !== "0"));
+        (rawApiData.error ||
+          (rawApiData.status && String(rawApiData.status).toLowerCase().includes("error")) ||
+          (rawApiData.errorCode && String(rawApiData.errorCode) !== "0"));
 
       if (!hasRealData || apiHasError) {
         // Clear technical data so the Tech Panel does not appear
@@ -960,14 +943,7 @@ function App() {
     );
   };
 
-  const formatMarkdownToHTML = (text) => {
-    let html = text;
-    // Replace bold syntax **text** with <strong>text</strong>
-    html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-    // Replace link syntax [text](url) with a clickable link <a href="url">text</a>
-    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
-    return html;
-  };
+
 
   const renderMessageContent = (msg) => {
     if (!msg || !msg.content) return null;
@@ -980,12 +956,19 @@ function App() {
     const renderContent = (text) => {
       // Replace literal \n with actual newline just in case
       let html = text.replace(/\\n/g, "\n");
-      
+
+      // NEW: Replace HTML non-breaking spaces if backend sends them
+      html = html.replace(/&nbsp;/gi, " ");
+
       // Clean up spaces around colons (e.g. "Subscriber ID : 94113627500" -> "Subscriber ID: 94113627500")
       html = html.replace(/\s+:\s+/g, ": ");
-      
-      // Collapse multiple consecutive spaces (excluding newlines)
-      html = html.replace(/[ \t]+/g, " ");
+
+      // UPDATED: Collapse ALL consecutive spaces (including special whitespace, excluding newlines) uniformly
+      html = html.replace(/[^\S\r\n]+/g, " ").trim();
+
+      // BONUS: If you want to make "BACKOFFICE_EMAIL" look more professional (e.g., "Backoffice Email")
+      // Uncomment the line below:
+      // html = html.replace(/BACKOFFICE_EMAIL/g, "Backoffice Email");
 
       // Highlight subscriber/customer IDs (e.g. ACC060859917, 94113627500)
       html = html.replace(/\b(ACC\d+|\d{10,})\b/g, '<span class="sub-id-highlight">$1</span>');
@@ -996,6 +979,7 @@ function App() {
       html = html.replace(/\*\*/g, "");
       // Render [text](url) links
       html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+
       return html;
     };
 
@@ -1022,8 +1006,6 @@ function App() {
     return (
       <div className={isSummary ? "summary-container" : ""}>
         {lines.map((line, idx) => {
-          const subIdRegex = /(ACC\d+|\d{10,})/g;
-          const parts = line.split(subIdRegex);
           return (
             <div
               key={idx}
@@ -1047,10 +1029,7 @@ function App() {
 
   return (
     <>
-      {/* ── Mobile Overlay (outside container to avoid stacking context issues) ── */}
-      {isMobileMenuOpen && (
-        <div className="mobile-overlay" onClick={() => setIsMobileMenuOpen(false)}></div>
-      )}
+      {/* Mobile overlay removed — dropdown overlay is rendered near the dropdown itself */}
 
       <div
         className="container"
@@ -1061,327 +1040,412 @@ function App() {
         }}
       >
 
-      {/* ── Sidebar ───────────────────────────────────────────────────── */}
-      <div className={`sidebar ${isMobileMenuOpen ? 'mobile-open' : ''}`}>
-        <div className="logo">Blitz Ai</div>
-
-        <h2>Agent Selector</h2>
-
-        {agents.map((agent, index) => (
-          <div
-            key={index}
-            className={`agent-card ${selectedAgent === agent ? "selected" : ""}`}
-            onClick={() => handleSelectAgent(agent)}
-          >
-            {agent}
+        {/* ── Sidebar ───────────────────────────────────────────────────── */}
+        <div className={`sidebar ${isMobileMenuOpen ? 'mobile-open' : ''}`}>
+          <div className="logo">
+            <img src="/blitz-icon.png" alt="Blitz.ai" className="sidebar-logo-icon" />
+            <span>Blitz.ai</span>
           </div>
-        ))}
-      </div>
 
-      {/* ── Chat Section ──────────────────────────────────────────────── */}
-      <div className="chat-section">
-        {selectedAgent && (
-          <>
-            {/* Dynamic header */}
-            <div className="chat-header centered-header">
-              {/* Mobile-only branding */}
-              <span className="mobile-header-brand">Blitz Ai</span>
-              <button className="mobile-menu-btn" onClick={() => setIsMobileMenuOpen(true)}>
-                <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="3" y1="6" x2="21" y2="6"></line>
-                  <line x1="3" y1="12" x2="21" y2="12"></line>
-                  <line x1="3" y1="18" x2="21" y2="18"></line>
-                </svg>
-              </button>
-              <span className="header-agent-title">
-              {isEmailAgentSelected
-                ? "BACKOFFICE EMAIL"
-                : isNonImplemented
-                  ? selectedAgent.toUpperCase()
-                  : "TECHNICAL SUPPORT ASSISTANT"}
-              </span>
+          <h2>Agent Selector</h2>
+
+          {agents.map((agent, index) => (
+            <div
+              key={index}
+              className={`agent-card ${selectedAgent === agent ? "selected" : ""}`}
+              onClick={() => handleSelectAgent(agent)}
+            >
+              {agent}
             </div>
+          ))}
+        </div>
 
-            {/* Non-implemented agents: blank body, no chat UI */}
-            {isNonImplemented ? (
-              <div className="agent-empty-state">
-                <div className="agent-empty-icon coming-soon-icon">
-                  {selectedAgent === "Usage Agent" ? (
-                    <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                      <line x1="3" y1="9" x2="21" y2="9"></line>
-                      <line x1="9" y1="21" x2="9" y2="9"></line>
-                    </svg>
-                  ) : (
-                    <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="12" cy="12" r="5"></circle>
-                      <line x1="12" y1="1" x2="12" y2="3"></line>
-                      <line x1="12" y1="21" x2="12" y2="23"></line>
-                      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-                      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-                      <line x1="1" y1="12" x2="3" y2="12"></line>
-                      <line x1="21" y1="12" x2="23" y2="12"></line>
-                      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-                      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-                    </svg>
-                  )}
+        {/* ── Chat Section ──────────────────────────────────────────────── */}
+        <div className="chat-section">
+          {selectedAgent && (
+            <>
+              {/* Dynamic header */}
+              <div className="chat-header centered-header">
+                {/* Mobile-only: brand + agent title on the left, hamburger on the right */}
+                <div className="mobile-header-left-wrap">
+                  <div className="mobile-brand-container">
+                    <img src="/blitz-icon.png" alt="Blitz.ai" className="mobile-logo-icon" />
+                    <span className="mobile-header-brand">Blitz.ai</span>
+                  </div>
+                  <span className="header-agent-title">
+                    {isEmailAgentSelected
+                      ? "BACKOFFICE EMAIL"
+                      : isNonImplemented
+                        ? selectedAgent.toUpperCase()
+                        : "TECHNICAL SUPPORT ASSISTANT"}
+                  </span>
                 </div>
-                <h2 className="agent-empty-title">{selectedAgent}</h2>
-                <p className="agent-empty-subtitle">This agent is currently under development and will be available soon.</p>
-                <div className="coming-soon-badge">COMING SOON</div>
-                <button className="go-to-email-btn" onClick={() => handleSelectAgent("Email Solution Agent")}>
-                  <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
-                    <polyline points="22,6 12,13 2,6"></polyline>
+                {/* Desktop title (centered) */}
+                <span className="desktop-header-title">
+                  {isEmailAgentSelected
+                    ? "BACKOFFICE EMAIL"
+                    : isNonImplemented
+                      ? selectedAgent.toUpperCase()
+                      : "TECHNICAL SUPPORT ASSISTANT"}
+                </span>
+                {/* Hamburger — mobile only, right-aligned */}
+                <button
+                  className="mobile-menu-btn"
+                  onClick={() => setIsMobileMenuOpen(prev => !prev)}
+                  aria-label="Select agent"
+                >
+                  <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="3" y1="6" x2="21" y2="6" />
+                    <line x1="3" y1="12" x2="21" y2="12" />
+                    <line x1="3" y1="18" x2="21" y2="18" />
                   </svg>
-                  Go to Email Agent
                 </button>
               </div>
-            ) : (
-              <>
-                {/* Chat messages area */}
-                <div className={`chat-box ${isEmailAgentSelected ? "email-chat-box" : ""}`}>
-                  {selectedAgent === "Configuration Agent" && chatMessages.length === 0 ? (
-                    <div className="agent-empty-state">
-                      <div className="agent-empty-icon config-icon">
-                        <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
-                        </svg>
-                      </div>
-                      <h2 className="agent-empty-title">Configuration Diagnostics</h2>
-                      <p className="agent-empty-subtitle">Enter a Subscriber ID or Customer ID to begin the diagnostic analysis.</p>
-                    </div>
-                  ) : isEmailAgentSelected && chatMessages.length === 0 ? (
-                    <div className="agent-empty-state">
-                      <div className="agent-empty-icon email-icon">
-                        <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
-                          <polyline points="22,6 12,13 2,6"></polyline>
-                        </svg>
-                      </div>
-                      <h2 className="agent-empty-title">Email Solution Assistant</h2>
-                      <p className="agent-empty-subtitle">Describe the customer's email issue. I'll analyze the symptoms and provide real-time troubleshooting steps.</p>
-                    </div>
-                  ) : (
-                    chatMessages.map((msg, index) => {
-                      const isLatestMessageAndAssistant = index === chatMessages.length - 1 && msg.role === "assistant";
 
-                      if (isEmailAgentSelected) {
-                        // Email Agent: Full-width rectangle card layout
-                        const isUser = msg.role === "user";
+              {/* Non-implemented agents: blank body, no chat UI */}
+              {isNonImplemented ? (
+                <div className="agent-empty-state">
+                  <div className="agent-empty-icon coming-soon-icon">
+                    {selectedAgent === "Usage Agent" ? (
+                      <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                        <line x1="3" y1="9" x2="21" y2="9"></line>
+                        <line x1="9" y1="21" x2="9" y2="9"></line>
+                      </svg>
+                    ) : (
+                      <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="5"></circle>
+                        <line x1="12" y1="1" x2="12" y2="3"></line>
+                        <line x1="12" y1="21" x2="12" y2="23"></line>
+                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                        <line x1="1" y1="12" x2="3" y2="12"></line>
+                        <line x1="21" y1="12" x2="23" y2="12"></line>
+                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                      </svg>
+                    )}
+                  </div>
+                  <h2 className="agent-empty-title">{selectedAgent}</h2>
+                  <p className="agent-empty-subtitle">This agent is currently under development and will be available soon.</p>
+                  <div className="coming-soon-badge">COMING SOON</div>
+                  <button className="go-to-email-btn" onClick={() => handleSelectAgent("Email Solution Agent")}>
+                    <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                      <polyline points="22,6 12,13 2,6"></polyline>
+                    </svg>
+                    Go to Email Agent
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {/* Chat messages area */}
+                  <div className={`chat-box ${isEmailAgentSelected ? "email-chat-box" : ""}`}>
+                    {selectedAgent === "Configuration Agent" && chatMessages.length === 0 ? (
+                      <div className="agent-empty-state">
+                        <div className="agent-empty-icon config-icon">
+                          <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+                          </svg>
+                        </div>
+                        <h2 className="agent-empty-title">Configuration Diagnostics</h2>
+                        <p className="agent-empty-subtitle">Enter a Subscriber ID or Customer ID to begin the diagnostic analysis.</p>
+                      </div>
+                    ) : isEmailAgentSelected && chatMessages.length === 0 ? (
+                      <div className="agent-empty-state">
+                        <div className="agent-empty-icon email-icon">
+                          <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                            <polyline points="22,6 12,13 2,6"></polyline>
+                          </svg>
+                        </div>
+                        <h2 className="agent-empty-title">Email Solution Assistant</h2>
+                        <p className="agent-empty-subtitle">Describe the customer's email issue. I'll analyze the symptoms and provide real-time troubleshooting steps.</p>
+                      </div>
+                    ) : (
+                      chatMessages.map((msg, index) => {
+                        const isLatestMessageAndAssistant = index === chatMessages.length - 1 && msg.role === "assistant";
+
+                        if (isEmailAgentSelected) {
+                          // Email Agent: Full-width rectangle card layout
+                          const isUser = msg.role === "user";
+                          return (
+                            <div
+                              key={index}
+                              className={`email-msg-card ${isUser ? "email-msg-user" : "email-msg-assistant"}`}
+                            >
+                              <div className="email-msg-avatar">
+                                {isUser ? "👤" : "🤖"}
+                              </div>
+                              <div className="email-msg-text">
+                                {renderMessageContent(msg)}
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        // Other agents: original bubble layout
                         return (
                           <div
                             key={index}
-                            className={`email-msg-card ${isUser ? "email-msg-user" : "email-msg-assistant"}`}
+                            className={msg.role === "assistant" ? "message assistant" : "message user"}
                           >
-                            <div className="email-msg-avatar">
-                              {isUser ? "👤" : "🤖"}
+                            <div className="message-avatar">
+                              {msg.role === "user" ? "👤" : "🤖"}
                             </div>
-                            <div className="email-msg-text">
+                            <div className="message-content">
                               {renderMessageContent(msg)}
                             </div>
+
+                            {msg.workflow && msg.workflow.length > 0 && (
+                              <div className="workflow-section">
+                                <strong>⚙ Workflow Execution:</strong>
+                                <ul>
+                                  {msg.workflow.map((step, i) => (
+                                    <li key={i}>{step}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+
+                            {msg.techDetails && msg.techDetails.length > 0 && !isLatestMessageAndAssistant && (
+                              <details className="chat-tech-details">
+                                <summary>View Technical Details</summary>
+                                <div className="tech-data">
+                                  {msg.techDetails.map((row, i) => {
+                                    if (row.isSection && !row.isSubSection) {
+                                      return (
+                                        <div key={i} className="tech-row tech-section-header">
+                                          <span className="tech-section-label">{row.key.trim()}</span>
+                                        </div>
+                                      );
+                                    }
+                                    if (row.isSubSection) {
+                                      return (
+                                        <div key={i} className="tech-row tech-row-indented tech-subsection-header">
+                                          <span className="tech-subsection-label">{row.key.trim()}</span>
+                                        </div>
+                                      );
+                                    }
+                                    let rowClass = "tech-row";
+                                    if (row.isDoubleIndented) {
+                                      rowClass += " tech-row-double-indented";
+                                    } else if (row.isIndented) {
+                                      rowClass += " tech-row-indented";
+                                    }
+                                    return (
+                                      <div key={i} className={rowClass}>
+                                        <span className="tech-key">{row.key.trim()}</span>
+                                        <span className={`tech-value ${statusColor(row.value)}`}>
+                                          {row.value}
+                                        </span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </details>
+                            )}
                           </div>
                         );
-                      }
+                      })
+                    )}
 
-                      // Other agents: original bubble layout
-                      return (
-                        <div
-                          key={index}
-                          className={msg.role === "assistant" ? "message assistant" : "message user"}
-                        >
-                          <div className="message-avatar">
-                            {msg.role === "user" ? "👤" : "🤖"}
-                          </div>
-                          <div className="message-content">
-                            {renderMessageContent(msg)}
-                          </div>
+                    {loading && (
+                      <div className="message assistant">
+                        <div className="typing">
+                          <span></span><span></span><span></span>
+                        </div>
+                      </div>
+                    )}
+                    <div ref={messagesEndRef} />
+                  </div>
 
-                          {msg.workflow && msg.workflow.length > 0 && (
-                            <div className="workflow-section">
-                              <strong>⚙ Workflow Execution:</strong>
-                              <ul>
-                                {msg.workflow.map((step, i) => (
-                                  <li key={i}>{step}</li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
+                  {/* Chat input */}
+                  <div className="chat-input">
+                    <div className="chat-input-container">
+                      <input
+                        type="text"
+                        placeholder={isEmailAgentSelected ? "Type your message..." : "Enter Subscriber ID or Customer ID..."}
+                        value={subscriberId}
+                        onChange={(e) => setSubscriberId(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+                      />
+                      <button className="send-icon-btn" onClick={handleSubmit} title="Send Message">
+                        <svg viewBox="0 0 24 24" className="send-icon">
+                          <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
 
-                          {msg.techDetails && msg.techDetails.length > 0 && !isLatestMessageAndAssistant && (
-                            <details className="chat-tech-details">
-                              <summary>View Technical Details</summary>
-                              <div className="tech-data">
-                                {msg.techDetails.map((row, i) => {
-                                  if (row.isSection && !row.isSubSection) {
-                                    return (
-                                      <div key={i} className="tech-row tech-section-header">
-                                        <span className="tech-section-label">{row.key.trim()}</span>
-                                      </div>
-                                    );
-                                  }
-                                  if (row.isSubSection) {
-                                    return (
-                                      <div key={i} className="tech-row tech-row-indented tech-subsection-header">
-                                        <span className="tech-subsection-label">{row.key.trim()}</span>
-                                      </div>
-                                    );
-                                  }
-                                  let rowClass = "tech-row";
-                                  if (row.isDoubleIndented) {
-                                    rowClass += " tech-row-double-indented";
-                                  } else if (row.isIndented) {
-                                    rowClass += " tech-row-indented";
-                                  }
+                  {/* ── Mobile Tech Panel — shown only when showTechPanel is true ── */}
+                  {showTechPanel && (
+                    <div className={`tech-panel mobile-only-tech ${isMobileTechPanelOpen ? "mobile-expanded" : "mobile-collapsed"}`}>
+                      <h3 onClick={() => {
+                        if (window.innerWidth <= 768) {
+                          setIsMobileTechPanelOpen(!isMobileTechPanelOpen);
+                        }
+                      }}>
+                        Technical Details
+                        <svg className="mobile-tech-toggle-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points={isMobileTechPanelOpen ? "18 15 12 9 6 15" : "6 9 12 15 18 9"} />
+                        </svg>
+                      </h3>
+
+                      <div className="tech-panel-content">
+                        {techRows.length > 0 ? (
+                          <>
+                            {renderTechDashboard()}
+                            <div className="tech-data">
+                              {techRows.map((row, i) => {
+                                if (row.isSection && !row.isSubSection) {
                                   return (
-                                    <div key={i} className={rowClass}>
-                                      <span className="tech-key">{row.key.trim()}</span>
-                                      <span className={`tech-value ${statusColor(row.value)}`}>
-                                        {row.value}
-                                      </span>
+                                    <div key={i} className="tech-row tech-section-header">
+                                      <span className="tech-section-label">{row.key.trim()}</span>
                                     </div>
                                   );
-                                })}
-                              </div>
-                            </details>
-                          )}
-                        </div>
-                      );
-                    })
-                  )}
-
-                  {loading && (
-                    <div className="message assistant">
-                      <div className="typing">
-                        <span></span><span></span><span></span>
+                                }
+                                if (row.isSubSection) {
+                                  return (
+                                    <div key={i} className="tech-row tech-row-indented tech-subsection-header">
+                                      <span className="tech-subsection-label">{row.key.trim()}</span>
+                                    </div>
+                                  );
+                                }
+                                let rowClass = "tech-row";
+                                if (row.isDoubleIndented) {
+                                  rowClass += " tech-row-double-indented";
+                                } else if (row.isIndented) {
+                                  rowClass += " tech-row-indented";
+                                }
+                                return (
+                                  <div key={i} className={rowClass}>
+                                    <span className="tech-key">{row.key.trim()}</span>
+                                    <span className={`tech-value ${statusColor(row.value)}`}>
+                                      {row.value}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </>
+                        ) : (
+                          <p className="no-data">No technical data yet.<br />Submit a query to see details.</p>
+                        )}
                       </div>
                     </div>
                   )}
-                  <div ref={messagesEndRef} />
-                </div>
+                </>
+              )}
 
-                {/* Chat input */}
-                <div className="chat-input">
-                  <div className="chat-input-container">
-                    <input
-                      type="text"
-                      placeholder={isEmailAgentSelected ? "Type your message..." : "Enter Subscriber ID or Customer ID..."}
-                      value={subscriberId}
-                      onChange={(e) => setSubscriberId(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+              {/* Footer */}
+              <div className="app-footer">
+                <div className="footer-content">
+                  <span className="powered-by">POWERED BY</span>
+                  <div className="footer-logo-container">
+                    <img
+                      src="/sltmobitel-icon-transparent.png"
+                      alt="SLT Mobitel Logo"
+                      className="footer-logo-img"
                     />
-                    <button className="send-icon-btn" onClick={handleSubmit} title="Send Message">
-                      <svg viewBox="0 0 24 24" className="send-icon">
-                        <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
-                      </svg>
-                    </button>
+                    <div className="footer-logo-text">
+                      <div className="logo-slt-mobitel">
+                        <span className="logo-slt">SLT</span>
+                        <span className="logo-mobitel">MOBITEL</span>
+                      </div>
+                      <div className="logo-embryo">THEEMBRYO</div>
+                      <div className="logo-innovation">INNOVATION CENTRE</div>
+                    </div>
                   </div>
                 </div>
-              </>
-            )}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* ── Desktop Resizer & Tech Panel — shown only when showTechPanel is true ── */}
+        {showTechPanel && (
+          <>
+            <div className="resizer desktop-only-tech" onMouseDown={startResizing} title="Drag to resize panel"></div>
+            <div className={`tech-panel desktop-only-tech ${isMobileTechPanelOpen ? "mobile-expanded" : "mobile-collapsed"}`}>
+              <h3 onClick={() => {
+                if (window.innerWidth <= 768) {
+                  setIsMobileTechPanelOpen(!isMobileTechPanelOpen);
+                }
+              }}>
+                Technical Details
+                <svg className="mobile-tech-toggle-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points={isMobileTechPanelOpen ? "18 15 12 9 6 15" : "6 9 12 15 18 9"} />
+                </svg>
+              </h3>
+
+              <div className="tech-panel-content">
+                {techRows.length > 0 ? (
+                  <>
+                    {renderTechDashboard()}
+                    <div className="tech-data">
+                      {techRows.map((row, i) => {
+                        if (row.isSection && !row.isSubSection) {
+                          return (
+                            <div key={i} className="tech-row tech-section-header">
+                              <span className="tech-section-label">{row.key.trim()}</span>
+                            </div>
+                          );
+                        }
+                        if (row.isSubSection) {
+                          return (
+                            <div key={i} className="tech-row tech-row-indented tech-subsection-header">
+                              <span className="tech-subsection-label">{row.key.trim()}</span>
+                            </div>
+                          );
+                        }
+                        let rowClass = "tech-row";
+                        if (row.isDoubleIndented) {
+                          rowClass += " tech-row-double-indented";
+                        } else if (row.isIndented) {
+                          rowClass += " tech-row-indented";
+                        }
+                        return (
+                          <div key={i} className={rowClass}>
+                            <span className="tech-key">{row.key.trim()}</span>
+                            <span className={`tech-value ${statusColor(row.value)}`}>
+                              {row.value}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                ) : (
+                  <p className="no-data">No technical data yet.<br />Submit a query to see details.</p>
+                )}
+              </div>
+            </div>
           </>
         )}
       </div>
 
-      {/* ── Resizer & Tech Panel — shown only when showTechPanel is true ── */}
-      {showTechPanel && (
-        <>
-          <div className="resizer" onMouseDown={startResizing} title="Drag to resize panel"></div>
-          <div className="tech-panel">
-            <h3>Technical Details</h3>
 
-            {techRows.length > 0 ? (
-              <>
-                {renderTechDashboard()}
-                <div className="tech-data">
-                  {techRows.map((row, i) => {
-                    if (row.isSection && !row.isSubSection) {
-                      return (
-                        <div key={i} className="tech-row tech-section-header">
-                          <span className="tech-section-label">{row.key.trim()}</span>
-                        </div>
-                      );
-                    }
-                    if (row.isSubSection) {
-                      return (
-                        <div key={i} className="tech-row tech-row-indented tech-subsection-header">
-                          <span className="tech-subsection-label">{row.key.trim()}</span>
-                        </div>
-                      );
-                    }
-                    let rowClass = "tech-row";
-                    if (row.isDoubleIndented) {
-                      rowClass += " tech-row-double-indented";
-                    } else if (row.isIndented) {
-                      rowClass += " tech-row-indented";
-                    }
-                    return (
-                      <div key={i} className={rowClass}>
-                        <span className="tech-key">{row.key.trim()}</span>
-                        <span className={`tech-value ${statusColor(row.value)}`}>
-                          {row.value}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </>
-            ) : (
-              <p className="no-data">No technical data yet.<br />Submit a query to see details.</p>
-            )}
-          </div>
-        </>
+      {/* ── Mobile Top Navigation Dropdown (mobile only, hidden on desktop) ── */}
+      {isMobileMenuOpen && (
+        <div className="mobile-dropdown-overlay" onClick={() => setIsMobileMenuOpen(false)} />
       )}
-
-    </div>
-
-      {/* ── Mobile Bottom Navigation Bar (mobile only, hidden on desktop) ── */}
-      <nav className="mobile-bottom-nav">
-        {agents.map((agent, index) => {
-          const icons = {
-            "Main Agent": (
-              <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-                <polyline points="9 22 9 12 15 12 15 22"/>
+      <nav className={`mobile-top-dropdown ${isMobileMenuOpen ? "open" : ""}`}>
+        {agents.map((agent, index) => (
+          <button
+            key={index}
+            className={`mobile-dropdown-item ${selectedAgent === agent ? "active" : ""}`}
+            onClick={() => { handleSelectAgent(agent); setIsMobileMenuOpen(false); }}
+          >
+            <span className="mobile-dropdown-dot" />
+            {agent}
+            {selectedAgent === agent && (
+              <svg className="mobile-dropdown-check" viewBox="0 0 24 24" fill="none" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12" />
               </svg>
-            ),
-            "Usage Agent": (
-              <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="18" y1="20" x2="18" y2="10"/>
-                <line x1="12" y1="20" x2="12" y2="4"/>
-                <line x1="6" y1="20" x2="6" y2="14"/>
-              </svg>
-            ),
-            "Email Solution Agent": (
-              <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
-                <polyline points="22,6 12,13 2,6"/>
-              </svg>
-            ),
-            "Configuration Agent": (
-              <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="3"/>
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-              </svg>
-            ),
-          };
-          const labels = {
-            "Main Agent": "Main",
-            "Usage Agent": "Usage",
-            "Email Solution Agent": "Email",
-            "Configuration Agent": "Config",
-          };
-          return (
-            <button
-              key={index}
-              className={`mobile-nav-btn ${selectedAgent === agent ? "active" : ""}`}
-              onClick={() => handleSelectAgent(agent)}
-            >
-              {icons[agent]}
-              <span>{labels[agent]}</span>
-            </button>
-          );
-        })}
+            )}
+          </button>
+        ))}
       </nav>
     </>
   );
