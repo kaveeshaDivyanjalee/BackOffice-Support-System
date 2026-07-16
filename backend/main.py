@@ -37,7 +37,7 @@ N8N_WEBHOOK_URL = os.getenv(
 )
 USE_TEST_MODE = os.getenv("USE_TEST_MODE", "false").lower() == "true"
 
-# Usage Agent n8n webhook URL (cloud n8n instance)
+# Usage Agent n8n webhook URL (local instance)
 USAGE_N8N_WEBHOOK_URL = os.getenv(
     "USAGE_N8N_WEBHOOK_URL",
     "https://sltrnddigitallab.app.n8n.cloud/webhook/891a401b-46cf-4c67-b3d6-f0eb128bbee7"
