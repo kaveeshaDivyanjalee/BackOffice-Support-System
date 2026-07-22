@@ -248,6 +248,13 @@ function App() {
   const [usageApiType, setUsageApiType] = useState(null); // "dashboard" | "protocol"
   const [isMobileUsageApiPanelOpen, setIsMobileUsageApiPanelOpen] = useState(false);
 
+  // ── Main Agent dedicated state ───────────────────────────────────────────
+  const [mainMessages, setMainMessages] = useState([]);
+  const [mainInput, setMainInput] = useState("");
+  const [mainLoading, setMainLoading] = useState(false);
+  const [mainSessionId] = useState(() => "main_" + Math.random().toString(36).substring(2, 9));
+  const mainMessagesEndRef = useRef(null);
+
   const messagesEndRef = useRef(null);
   const usageMessagesEndRef = useRef(null);
 
@@ -267,6 +274,13 @@ function App() {
     }, 80);
     return () => clearTimeout(timer);
   }, [chatMessages, loading]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      mainMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [mainMessages, mainLoading]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -462,10 +476,158 @@ function App() {
     "Configuration Agent",
   ];
 
+  // ── Main Agent Submit Handler ─────────────────────────────────────────────
+  const handleMainSubmit = async (customPrompt) => {
+    const messageToSend = typeof customPrompt === "string" ? customPrompt : mainInput;
+    if (!messageToSend || !messageToSend.trim()) {
+      alert("Please enter a query or message for the Main Agent");
+      return;
+    }
+
+    const userMsg = messageToSend.trim();
+    if (typeof customPrompt !== "string") {
+      setMainInput("");
+    }
+
+    setMainMessages(prev => [...prev, { role: "user", content: userMsg }]);
+    setMainLoading(true);
+
+    try {
+      const response = await fetch(getApiUrl("/main-agent-chat"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: userMsg,
+          session_id: mainSessionId
+        }),
+      });
+
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+      const data = await response.json();
+      if (data.error) throw new Error(data.error);
+
+      let parsedDev = null;
+      let workflow = [];
+
+      const aiRaw = data.raw?.ai_analysis;
+      if (aiRaw && typeof aiRaw === "object") {
+        parsedDev = aiRaw.developer_output || null;
+        const wfRaw = parsedDev?.workflow_execution;
+        if (Array.isArray(wfRaw)) {
+          workflow = wfRaw;
+        } else if (typeof wfRaw === "string") {
+          workflow = wfRaw.split(",").map(s => s.trim()).filter(Boolean);
+        }
+      }
+
+      const cleanedWorkflow = [];
+      let sessionInserted = false;
+      const BOILERPLATE_STEPS = ["webhook triggered", "send post request", "code in javascript node"];
+      const isBoilerplate = (step) => BOILERPLATE_STEPS.some(b => step.toLowerCase().includes(b));
+      const cleanStepText = (step) => step.replace(/[\][{}'"]/g, "").replace(/_/g, " ").trim();
+
+      if (workflow && workflow.length > 0) {
+        for (const step of workflow) {
+          if (isBoilerplate(step)) {
+            if (!sessionInserted) {
+              cleanedWorkflow.push("🟢 Session Started");
+              sessionInserted = true;
+            }
+          } else {
+            cleanedWorkflow.push(cleanStepText(step));
+          }
+        }
+      }
+      if (!sessionInserted && cleanedWorkflow.length > 0) {
+        cleanedWorkflow.unshift("🟢 Session Started");
+      }
+
+      let toolCalled = data.raw?.toolName || data.raw?.tool || null;
+      if (cleanedWorkflow && cleanedWorkflow.length > 0) {
+        for (const step of cleanedWorkflow) {
+          const lowerStep = step.toLowerCase();
+          if (lowerStep.includes("config") || lowerStep.includes("diagnose")) {
+            toolCalled = "Configuration Agent";
+          } else if (lowerStep.includes("usage") || lowerStep.includes("data")) {
+            toolCalled = "Usage Agent";
+          } else if (lowerStep.includes("email") || lowerStep.includes("send")) {
+            toolCalled = "Email Solution Agent";
+          }
+        }
+      }
+
+      // Fallback keyword search incorporating userMsg so ⚡ Routed via: [Agent] badge ALWAYS displays accurately
+      if (!toolCalled) {
+        const combinedStr = (userMsg + " " + JSON.stringify(data.raw || {}) + " " + (data.reply || "")).toLowerCase();
+        
+        // 1. Email check first (most specific terms)
+        if (
+          combinedStr.includes("email") ||
+          combinedStr.includes("mail") ||
+          combinedStr.includes("domain") ||
+          combinedStr.includes("mailbox") ||
+          combinedStr.includes("procaremedical") ||
+          combinedStr.includes("@sltnet.lk")
+        ) {
+          toolCalled = "Email Solution Agent";
+        }
+        // 2. Usage & Billing check second (bill, billing, account number, usage, protocol, gb, mb, dashboard)
+        else if (
+          combinedStr.includes("bill") ||
+          combinedStr.includes("account number") ||
+          combinedStr.includes("usage") ||
+          combinedStr.includes("protocol") ||
+          combinedStr.includes("dashboard") ||
+          combinedStr.includes("download") ||
+          combinedStr.includes("upload")
+        ) {
+          toolCalled = "Usage Agent";
+        }
+        // 3. Configuration check third (line health, nms, ont, pon, signal, fault, router)
+        else if (
+          combinedStr.includes("line health") ||
+          combinedStr.includes("nms") ||
+          combinedStr.includes("ont") ||
+          combinedStr.includes("pon") ||
+          combinedStr.includes("signal") ||
+          combinedStr.includes("fault") ||
+          combinedStr.includes("router") ||
+          combinedStr.includes("config")
+        ) {
+          toolCalled = "Configuration Agent";
+        }
+      }
+
+      setMainMessages(prev => [
+        ...prev,
+        {
+          role: "assistant",
+          content: data.reply,
+          workflow: cleanedWorkflow,
+          toolCalled: toolCalled
+        }
+      ]);
+    } catch (error) {
+      console.error("Error:", error);
+      setMainMessages(prev => [
+        ...prev,
+        { role: "assistant", content: `Error: ${error.message}`, workflow: [] }
+      ]);
+    } finally {
+      setMainLoading(false);
+    }
+  };
+
   // ── Submit ────────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
     if (!selectedAgent) {
       alert("Please select an agent first");
+      return;
+    }
+
+    if (selectedAgent === "Main Agent") {
+      handleMainSubmit();
       return;
     }
 
@@ -1045,6 +1207,15 @@ function App() {
     // Fix literal \n escape sequences that backend sometimes sends as text
     let content = msg.content.replace(/\\n/g, "\n");
 
+    // Check if content contains markdown table syntax (|) or headings (#)
+    if (content.includes("|") || /^\s*#{1,6}\s+/m.test(content)) {
+      return (
+        <div className="markdown-rendered-content">
+          {renderMarkdown(content)}
+        </div>
+      );
+    }
+
     // Clean up dangling ** markers (e.g. "** " at the end or "**customer_output**")
     // First render actual bold markdown, then strip any leftover asterisks
     const renderContent = (text) => {
@@ -1059,10 +1230,6 @@ function App() {
 
       // UPDATED: Collapse ALL consecutive spaces (including special whitespace, excluding newlines) uniformly
       html = html.replace(/[^\S\r\n]+/g, " ").trim();
-
-      // BONUS: If you want to make "BACKOFFICE_EMAIL" look more professional (e.g., "Backoffice Email")
-      // Uncomment the line below:
-      // html = html.replace(/BACKOFFICE_EMAIL/g, "Backoffice Email");
 
       // Highlight subscriber/customer IDs (e.g. ACC060859917, 94113627500)
       html = html.replace(/\b(ACC\d+|\d{10,})\b/g, '<span class="sub-id-highlight">$1</span>');
@@ -1164,8 +1331,11 @@ function App() {
     };
 
     const parseInline = (str) => {
+      // Highlight subscriber/customer IDs (e.g. ACC060859917, 94113627500)
+      let html = str.replace(/\b(ACC\d+|\d{10,})\b/g, '<span class="sub-id-highlight">$1</span>');
+
       // Bold **text**
-      let html = str.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
         .replace(/\*(.*?)\*/g, '<em>$1</em>')
         .replace(/`(.*?)`/g, '<code>$1</code>');
 
@@ -1194,7 +1364,9 @@ function App() {
         elements.push(<div key={key++} className="usage-md-spacer" />);
         continue;
       }
-      if (trimmed.startsWith("### ")) {
+      if (trimmed.startsWith("#### ")) {
+        elements.push(<h4 key={key++} className="usage-md-h4" dangerouslySetInnerHTML={{ __html: parseInline(trimmed.slice(5)) }} />);
+      } else if (trimmed.startsWith("### ")) {
         elements.push(<h3 key={key++} className="usage-md-h3" dangerouslySetInnerHTML={{ __html: parseInline(trimmed.slice(4)) }} />);
       } else if (trimmed.startsWith("## ")) {
         elements.push(<h2 key={key++} className="usage-md-h2" dangerouslySetInnerHTML={{ __html: parseInline(trimmed.slice(3)) }} />);
@@ -1268,6 +1440,7 @@ function App() {
           rawJson = parsed;
           if (toolName.toLowerCase().includes("protocol")) apiType = "protocol";
           else if (toolName.toLowerCase().includes("dashboard")) apiType = "dashboard";
+          else if (toolName.toLowerCase().includes("bill") || toolName.toLowerCase().includes("billing")) apiType = "billing";
           else apiType = "api";
           break;
         }
@@ -1297,12 +1470,13 @@ function App() {
   };
 
   const isEmailAgentSelected = selectedAgent === "Email Solution Agent";
-  const NON_IMPLEMENTED = ["Main Agent"];
+  const NON_IMPLEMENTED = [];
   const isNonImplemented = NON_IMPLEMENTED.includes(selectedAgent);
 
   // Show Tech Panel only when it's not email, not non-implemented, not usage agent, and user entered subscriber ID (data is loaded or loading)
   const isUsageAgent = selectedAgent === "Usage Agent";
-  const showTechPanel = !isEmailAgentSelected && !isNonImplemented && !isUsageAgent && (apiData !== null || devOutput !== null || loading);
+  const isMainAgent = selectedAgent === "Main Agent";
+  const showTechPanel = !isEmailAgentSelected && !isNonImplemented && !isUsageAgent && !isMainAgent && (apiData !== null || devOutput !== null || loading);
 
   return (
     <>
@@ -1350,24 +1524,28 @@ function App() {
                     <span className="mobile-header-brand">Blitz.ai</span>
                   </div>
                   <span className="header-agent-title">
-                    {isEmailAgentSelected
-                      ? "BACKOFFICE EMAIL"
-                      : selectedAgent === "Usage Agent"
-                        ? "USAGE AGENT"
-                        : isNonImplemented
-                          ? selectedAgent.toUpperCase()
-                          : "TECHNICAL SUPPORT ASSISTANT"}
+                    {selectedAgent === "Main Agent"
+                      ? "BACKOFFICE ROUTER AGENT"
+                      : isEmailAgentSelected
+                        ? "BACKOFFICE EMAIL"
+                        : selectedAgent === "Usage Agent"
+                          ? "USAGE AGENT"
+                          : selectedAgent === "Configuration Agent"
+                            ? "TECHNICAL SUPPORT ASSISTANT"
+                            : selectedAgent.toUpperCase()}
                   </span>
                 </div>
                 {/* Desktop title (centered) */}
                 <span className="desktop-header-title">
-                  {isEmailAgentSelected
-                    ? "BACKOFFICE EMAIL"
-                    : selectedAgent === "Usage Agent"
-                      ? "USAGE AGENT"
-                      : isNonImplemented
-                        ? selectedAgent.toUpperCase()
-                        : "TECHNICAL SUPPORT ASSISTANT"}
+                  {selectedAgent === "Main Agent"
+                    ? "BACKOFFICE ROUTER AGENT"
+                    : isEmailAgentSelected
+                      ? "BACKOFFICE EMAIL"
+                      : selectedAgent === "Usage Agent"
+                        ? "USAGE AGENT"
+                        : selectedAgent === "Configuration Agent"
+                          ? "TECHNICAL SUPPORT ASSISTANT"
+                          : selectedAgent.toUpperCase()}
                 </span>
                 {/* Hamburger — mobile only, right-aligned */}
                 <button
@@ -1419,6 +1597,7 @@ function App() {
                                 <summary style={{ fontWeight: '600' }}>
                                   {msg.apiType === "dashboard" && "Dashboard Summary"}
                                   {msg.apiType === "protocol" && "Protocol Usage"}
+                                  {msg.apiType === "billing" && "Billing"}
                                   {msg.apiType === "api" && "API Response"}
                                   {!msg.apiType && "View Technical Details"}
                                 </summary>
@@ -1507,6 +1686,7 @@ function App() {
                         <span className="usage-raw-title" style={{ paddingLeft: '8px' }}>
                           {usageApiType === "dashboard" && "Dashboard Summary"}
                           {usageApiType === "protocol" && "Protocol Usage"}
+                          {usageApiType === "billing" && "Billing"}
                           {usageApiType === "api" && "API Response"}
                           {!usageApiType && "API Data Panel"}
                         </span>
@@ -1614,7 +1794,78 @@ function App() {
                 <>
                   {/* Chat messages area */}
                   <div className={`chat-box ${isEmailAgentSelected ? "email-chat-box" : ""}`}>
-                    {selectedAgent === "Configuration Agent" && chatMessages.length === 0 ? (
+                    {selectedAgent === "Main Agent" ? (
+                      mainMessages.length === 0 ? (
+                        <div className="agent-empty-state">
+                          <div className="agent-empty-icon main-icon">
+                            <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23-.693L5 14.5m14.8.8l1.402 1.402c1 1 .03 2.71-1.379 2.41l-2.134-.534M5 14.5l-1.402 1.402c-1 1-.029 2.71 1.379 2.41l2.134-.534M5 14.5L12 21l7-6.5" />
+                            </svg>
+                          </div>
+                          <h2 className="agent-empty-title">Main Agent</h2>
+                          <p className="agent-empty-subtitle">Ask any customer support question and I'll route it to the right specialist automatically.<br />Try: <em>"Check line health for subscriber 94112322658"</em></p>
+                          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center', marginTop: '16px' }}>
+                            {[
+                              "Check line health for subscriber 94112322658",
+                              "Show data usage for subscriber 94112322658",
+                              "I cannot login to my email account",
+                              "Check bill for account 0015472433"
+                            ].map((prompt, i) => (
+                              <button
+                                key={i}
+                                onClick={() => handleMainSubmit(prompt)}
+                                style={{
+                                  background: '#f1f5f9', border: '1px solid #e2e8f0',
+                                  color: '#475569', padding: '6px 12px', borderRadius: '16px',
+                                  fontSize: '0.78rem', cursor: 'pointer', fontFamily: 'inherit'
+                                }}
+                              >
+                                {prompt}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        mainMessages.map((msg, index) => (
+                          <div
+                            key={index}
+                            className={msg.role === "assistant" ? "message assistant main-agent-msg" : "message user"}
+                          >
+                            {msg.role === "assistant" && msg.toolCalled && (
+                              <div style={{
+                                display: 'inline-block',
+                                background: 'rgba(99,102,241,0.1)',
+                                border: '1px solid #6366f1',
+                                color: '#6366f1',
+                                fontSize: '0.72rem',
+                                fontWeight: '600',
+                                padding: '2px 9px',
+                                borderRadius: '6px',
+                                marginBottom: '8px'
+                              }}>
+                                ⚡ Routed via: {msg.toolCalled}
+                              </div>
+                            )}
+                            <div className="message-avatar">
+                              {msg.role === "user" ? "👤" : "🤖"}
+                            </div>
+                            <div className="message-content">
+                              {renderMessageContent(msg)}
+                            </div>
+                            {msg.workflow && msg.workflow.length > 0 && (
+                              <div className="workflow-section">
+                                <strong>⚙ Workflow Execution:</strong>
+                                <ul>
+                                  {msg.workflow.map((step, i) => (
+                                    <li key={i}>{step}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+                        ))
+                      )
+                    ) : selectedAgent === "Configuration Agent" && chatMessages.length === 0 ? (
                       <div className="agent-empty-state">
                         <div className="agent-empty-icon config-icon">
                           <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1632,7 +1883,7 @@ function App() {
                             <polyline points="22,6 12,13 2,6"></polyline>
                           </svg>
                         </div>
-                        <h2 className="agent-empty-title">Email Solution Assistant</h2>
+                        <h2 className="agent-empty-title">Email Solution Agent</h2>
                         <p className="agent-empty-subtitle">Describe the customer's email issue. I'll analyze the symptoms and provide real-time troubleshooting steps.</p>
                       </div>
                     ) : (
@@ -1663,6 +1914,21 @@ function App() {
                             key={index}
                             className={msg.role === "assistant" ? "message assistant" : "message user"}
                           >
+                            {msg.role === "assistant" && msg.toolCalled && (
+                              <div style={{
+                                display: 'inline-block',
+                                background: 'rgba(99,102,241,0.1)',
+                                border: '1px solid #6366f1',
+                                color: '#6366f1',
+                                fontSize: '0.72rem',
+                                fontWeight: '600',
+                                padding: '2px 9px',
+                                borderRadius: '6px',
+                                marginBottom: '8px'
+                              }}>
+                                ⚡ Routed via: {msg.toolCalled}
+                              </div>
+                            )}
                             <div className="message-avatar">
                               {msg.role === "user" ? "👤" : "🤖"}
                             </div>
@@ -1723,31 +1989,60 @@ function App() {
                       })
                     )}
 
-                    {loading && (
-                      <div className="message assistant">
-                        <div className="typing">
-                          <span></span><span></span><span></span>
+                    {selectedAgent === "Main Agent" ? (
+                      mainLoading && (
+                        <div className="message assistant main-agent-msg">
+                          <div className="typing">
+                            <span></span><span></span><span></span>
+                          </div>
                         </div>
-                      </div>
+                      )
+                    ) : (
+                      loading && (
+                        <div className="message assistant">
+                          <div className="typing">
+                            <span></span><span></span><span></span>
+                          </div>
+                        </div>
+                      )
                     )}
-                    <div ref={messagesEndRef} />
+                    {selectedAgent === "Main Agent" ? <div ref={mainMessagesEndRef} /> : <div ref={messagesEndRef} />}
                   </div>
 
                   {/* Chat input */}
                   <div className="chat-input">
                     <div className="chat-input-container">
-                      <input
-                        type="text"
-                        placeholder={isEmailAgentSelected ? "Type your message..." : "Enter Subscriber ID or Customer ID..."}
-                        value={subscriberId}
-                        onChange={(e) => setSubscriberId(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
-                      />
-                      <button className="send-icon-btn" onClick={handleSubmit} title="Send Message">
-                        <svg viewBox="0 0 24 24" className="send-icon">
-                          <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
-                        </svg>
-                      </button>
+                      {selectedAgent === "Main Agent" ? (
+                        <>
+                          <input
+                            type="text"
+                            placeholder="Type your message..."
+                            value={mainInput}
+                            onChange={(e) => setMainInput(e.target.value)}
+                            onKeyDown={(e) => e.key === "Enter" && handleMainSubmit()}
+                          />
+                          <button className="send-icon-btn" onClick={() => handleMainSubmit()} title="Send Message">
+                            <svg viewBox="0 0 24 24" className="send-icon">
+                              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+                            </svg>
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <input
+                            type="text"
+                            placeholder={isEmailAgentSelected ? "Type your message..." : "Enter Subscriber ID or Customer ID..."}
+                            value={subscriberId}
+                            onChange={(e) => setSubscriberId(e.target.value)}
+                            onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+                          />
+                          <button className="send-icon-btn" onClick={handleSubmit} title="Send Message">
+                            <svg viewBox="0 0 24 24" className="send-icon">
+                              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+                            </svg>
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
 
