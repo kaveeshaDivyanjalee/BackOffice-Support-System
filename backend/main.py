@@ -33,9 +33,21 @@ def read_root():
 # N8N webhook URL - make it configurable via environment or use test mode
 N8N_WEBHOOK_URL = os.getenv(
     "N8N_WEBHOOK_URL",
-    "https://sltrnddigitallab.app.n8n.cloud/webhook/bddee54a-4c52-4c92-9e1f-f552b48e8e2e"
+    "https://sltrnddigitallab.app.n8n.cloud/webhook/e3713862-9787-49d5-b00d-445f1a17cdc6"
 )
 USE_TEST_MODE = os.getenv("USE_TEST_MODE", "false").lower() == "true"
+
+# Usage Agent n8n webhook URL (local instance)
+USAGE_N8N_WEBHOOK_URL = os.getenv(
+    "USAGE_N8N_WEBHOOK_URL",
+    "https://sltrnddigitallab.app.n8n.cloud/webhook/891a401b-46cf-4c67-b3d6-f0eb128bbee7"
+)
+
+# Configuration Agent n8n webhook URL
+CONFIG_N8N_WEBHOOK_URL = os.getenv(
+    "CONFIG_N8N_WEBHOOK_URL",
+    "https://sltrnddigitallab.app.n8n.cloud/webhook/bddee54a-4c52-4c92-9e1f-f552b48e8e2e"
+)
 
 class SupportQuery(BaseModel):
     agent: str
@@ -46,6 +58,72 @@ class EmailChatRequest(BaseModel):
     message: str
     user_id: str = "020601"
     thread_id: str = "default_thread"
+
+class UsageChatRequest(BaseModel):
+    query: str
+    session_id: str = "default"
+
+class MainAgentChatRequest(BaseModel):
+    message: str
+    session_id: str = "default_main_session"
+
+@app.post("/main-agent-chat")
+def handle_main_agent_chat(request: MainAgentChatRequest):
+    try:
+        print(f"Main Agent request: {request.model_dump()}")
+        print(f"Main Agent N8N URL: {N8N_WEBHOOK_URL}")
+
+        payload = {
+            "action": "sendMessage",
+            "chatInput": request.message,
+            "sessionId": request.session_id
+        }
+
+        # Chat trigger node requires action=sendMessage query parameter in the URL
+        url = N8N_WEBHOOK_URL
+        if "action=" not in url:
+            connector = "&" if "?" in url else "?"
+            url += f"{connector}action=sendMessage"
+
+        response = requests.post(
+            url,
+            json=payload,
+            timeout=300
+        )
+
+        print(f"Main Agent N8N HTTP Status: {response.status_code}")
+        print(f"Main Agent N8N Raw Response: {response.text[:1000]}")
+
+        response.raise_for_status()
+
+        if not response.text.strip():
+            return {"error": "n8n returned an empty response. Make sure the Main Agent workflow is active."}
+
+        n8n_data = response.json()
+
+        # Unwrap list responses
+        if isinstance(n8n_data, list):
+            n8n_data = n8n_data[0] if len(n8n_data) > 0 else {}
+
+        # Extract the reply text from the n8n Respond to Webhook output
+        # The Main Agent uses "respondWith: allIncomingItems", so output key is "output"
+        reply = (
+            n8n_data.get("output")
+            or n8n_data.get("reply")
+            or n8n_data.get("ai_analysis", {}).get("customer_output", {}).get("summary")
+            or str(n8n_data)
+        )
+
+        print(f"Main Agent reply: {str(reply)[:500]}")
+        return {"reply": reply, "raw": n8n_data}
+
+    except requests.exceptions.ConnectionError:
+        return {"error": f"Cannot connect to n8n at {N8N_WEBHOOK_URL}. Is n8n running?"}
+    except requests.exceptions.HTTPError as e:
+        return {"error": f"n8n returned HTTP {e.response.status_code}. Check that the Main Agent workflow is Active."}
+    except Exception as e:
+        print(f"Main Agent error: {str(e)}")
+        return {"error": str(e)}
 
 @app.post("/email-chat")
 def handle_email_chat(request: EmailChatRequest):
@@ -66,11 +144,49 @@ def handle_email_chat(request: EmailChatRequest):
         print(f"Email agent error: {str(e)}")
         return {"error": str(e)}
 
+@app.post("/usage-chat")
+def handle_usage_chat(request: UsageChatRequest):
+    try:
+        print(f"Usage agent request: {request.model_dump()}")
+        print(f"Usage N8N URL: {USAGE_N8N_WEBHOOK_URL}")
+
+        response = requests.post(
+            USAGE_N8N_WEBHOOK_URL,
+            json={"query": request.query, "session_id": request.session_id},
+            timeout=120
+        )
+
+        print(f"Usage N8N HTTP Status: {response.status_code}")
+        print(f"Usage N8N Raw Response: {response.text[:500]}")
+
+        response.raise_for_status()
+
+        if response.text.strip():
+            n8n_data = response.json()
+        else:
+            return {"error": "n8n returned an empty response. Make sure the workflow is active."}
+
+        # Unwrap if n8n returns a list
+        if isinstance(n8n_data, list):
+            n8n_data = n8n_data[0] if len(n8n_data) > 0 else {}
+
+        print(f"Usage N8N parsed response: {json.dumps(n8n_data, indent=2)[:1000]}")
+        return n8n_data
+
+    except requests.exceptions.ConnectionError:
+        return {"error": f"Cannot connect to n8n at {USAGE_N8N_WEBHOOK_URL}. Is your local n8n running?"}
+    except requests.exceptions.HTTPError as e:
+        return {"error": f"n8n returned HTTP {e.response.status_code}. Check that the workflow is Active (not just saved)."}
+    except Exception as e:
+        print(f"Usage agent error: {str(e)}")
+        return {"error": str(e)}
+
+
 @app.post("/support-query")
 def handle_support(query: SupportQuery):
     try:
         print(f"Frontend request: {query.model_dump()}")
-        print(f"N8N URL: {N8N_WEBHOOK_URL}")
+        print(f"N8N URL: {CONFIG_N8N_WEBHOOK_URL}")
         print(f"Test mode: {USE_TEST_MODE}")
         
         # Test mode - returns mock response without calling N8N
@@ -102,9 +218,9 @@ def handle_support(query: SupportQuery):
         print(f"Final payload sent to N8N: {payload}")
 
         response = requests.post(
-            N8N_WEBHOOK_URL,
+            CONFIG_N8N_WEBHOOK_URL,
             json=payload,
-            timeout=120
+            timeout=300
         )
 
         print(f"N8N HTTP Status: {response.status_code}")
@@ -163,7 +279,7 @@ def handle_support(query: SupportQuery):
         print(f"Connection error: {str(conn_error)}")
         return {
             "status": "error",
-            "message": f"Cannot connect to N8N at {N8N_WEBHOOK_URL}",
+            "message": f"Cannot connect to N8N at {CONFIG_N8N_WEBHOOK_URL}",
             "reply": "N8N service is unreachable. Please verify the webhook URL and ensure N8N is running.",
             "debug": str(conn_error)
         }
