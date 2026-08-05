@@ -1947,42 +1947,25 @@ function App() {
                               </div>
                             )}
 
-                            {msg.techDetails && msg.techDetails.length > 0 && !isLatestMessageAndAssistant && (
-                              <details className="chat-tech-details">
-                                <summary>View Technical Details</summary>
-                                <div className="tech-data">
-                                  {msg.techDetails.map((row, i) => {
-                                    if (row.isSection && !row.isSubSection) {
-                                      return (
-                                        <div key={i} className="tech-row tech-section-header">
-                                          <span className="tech-section-label">{row.key.trim()}</span>
-                                        </div>
-                                      );
-                                    }
-                                    if (row.isSubSection) {
-                                      return (
-                                        <div key={i} className="tech-row tech-row-indented tech-subsection-header">
-                                          <span className="tech-subsection-label">{row.key.trim()}</span>
-                                        </div>
-                                      );
-                                    }
-                                    let rowClass = "tech-row";
-                                    if (row.isDoubleIndented) {
-                                      rowClass += " tech-row-double-indented";
-                                    } else if (row.isIndented) {
-                                      rowClass += " tech-row-indented";
-                                    }
-                                    return (
-                                      <div key={i} className={rowClass}>
-                                        <span className="tech-key">{row.key.trim()}</span>
-                                        <span className={`tech-value ${statusColor(row.value)}`}>
-                                          {row.value}
-                                        </span>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              </details>
+                            {msg.techDetails && msg.techDetails.length > 0 && (
+                              <button
+                                className="view-tech-details-btn"
+                                onClick={() => {
+                                  setApiData(msg.apiDataRaw || null);
+                                  setDevOutput(msg.devOutputRaw || null);
+                                }}
+                              >
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                  <polyline points="14 2 14 8 20 8" />
+                                  <line x1="16" y1="13" x2="8" y2="13" />
+                                  <line x1="16" y1="17" x2="8" y2="17" />
+                                </svg>
+                                View Technical Details
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <polyline points="9 18 15 12 9 6" />
+                                </svg>
+                              </button>
                             )}
                           </div>
                         );
