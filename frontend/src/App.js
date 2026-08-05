@@ -543,60 +543,14 @@ function App() {
         cleanedWorkflow.unshift("🟢 Session Started");
       }
 
-      let toolCalled = data.raw?.toolName || data.raw?.tool || null;
-      if (cleanedWorkflow && cleanedWorkflow.length > 0) {
-        for (const step of cleanedWorkflow) {
-          const lowerStep = step.toLowerCase();
-          if (lowerStep.includes("config") || lowerStep.includes("diagnose")) {
-            toolCalled = "Configuration Agent";
-          } else if (lowerStep.includes("usage") || lowerStep.includes("data")) {
-            toolCalled = "Usage Agent";
-          } else if (lowerStep.includes("email") || lowerStep.includes("send")) {
-            toolCalled = "Email Solution Agent";
-          }
-        }
-      }
+      // Use exact tool name from n8n intermediateSteps only — no keyword guessing
+      // If n8n did not call any sub-agent tool, agent_used will be null and no badge is shown
+      let toolCalled = data.agent_used || null;
 
-      // Fallback keyword search incorporating userMsg so ⚡ Routed via: [Agent] badge ALWAYS displays accurately
-      if (!toolCalled) {
-        const combinedStr = (userMsg + " " + JSON.stringify(data.raw || {}) + " " + (data.reply || "")).toLowerCase();
-        
-        // 1. Email check first (most specific terms)
-        if (
-          combinedStr.includes("email") ||
-          combinedStr.includes("mail") ||
-          combinedStr.includes("domain") ||
-          combinedStr.includes("mailbox") ||
-          combinedStr.includes("procaremedical") ||
-          combinedStr.includes("@sltnet.lk")
-        ) {
-          toolCalled = "Email Solution Agent";
-        }
-        // 2. Usage & Billing check second (bill, billing, account number, usage, protocol, gb, mb, dashboard)
-        else if (
-          combinedStr.includes("bill") ||
-          combinedStr.includes("account number") ||
-          combinedStr.includes("usage") ||
-          combinedStr.includes("protocol") ||
-          combinedStr.includes("dashboard") ||
-          combinedStr.includes("download") ||
-          combinedStr.includes("upload")
-        ) {
-          toolCalled = "Usage Agent";
-        }
-        // 3. Configuration check third (line health, nms, ont, pon, signal, fault, router)
-        else if (
-          combinedStr.includes("line health") ||
-          combinedStr.includes("nms") ||
-          combinedStr.includes("ont") ||
-          combinedStr.includes("pon") ||
-          combinedStr.includes("signal") ||
-          combinedStr.includes("fault") ||
-          combinedStr.includes("router") ||
-          combinedStr.includes("config")
-        ) {
-          toolCalled = "Configuration Agent";
-        }
+      // Normalize tool name: remove underscores and fix display names
+      if (toolCalled) {
+        toolCalled = toolCalled.replace(/_/g, " "); // "Usage_Agent" → "Usage Agent"
+        if (toolCalled === "Email Solution") toolCalled = "Email Solution Agent";
       }
 
       setMainMessages(prev => [
@@ -1592,57 +1546,34 @@ function App() {
                                 : renderMarkdown(msg.content)
                               }
                             </div>
-                            {msg.techDetails && msg.techDetails.length > 0 && !isLatestMessageAndAssistant && (
-                              <details className="chat-tech-details" style={{ marginTop: '8px' }}>
-                                <summary style={{ fontWeight: '600' }}>
-                                  {msg.apiType === "dashboard" && "Dashboard Summary"}
-                                  {msg.apiType === "protocol" && "Protocol Usage"}
-                                  {msg.apiType === "billing" && "Billing"}
-                                  {msg.apiType === "api" && "API Response"}
-                                  {!msg.apiType && "View Technical Details"}
-                                </summary>
-                                <div className="tech-data">
-                                  {msg.techDetails.map((row, i) => {
-                                    if (row.isSection && !row.isSubSection) {
-                                      return (
-                                        <div key={i} className="tech-row tech-section-header">
-                                          <span className="tech-section-label">{row.key.replace(/_/g, " ").trim()}</span>
-                                        </div>
-                                      );
-                                    }
-                                    if (row.isSubSection) {
-                                      return (
-                                        <div key={i} className="tech-row tech-row-indented tech-subsection-header" style={{ gridTemplateColumns: '1fr' }}>
-                                          <span className="tech-subsection-label" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.key.replace(/_/g, " ").trim()}</span>
-                                        </div>
-                                      );
-                                    }
-                                    if (row.isItemHeader) {
-                                      return (
-                                        <div key={i} className="tech-row tech-row-indented" style={{ backgroundColor: '#e8edf8', borderTop: '2px solid #c7d2fe', borderBottom: '1px solid #c7d2fe', gridTemplateColumns: '1fr' }}>
-                                          <span className="tech-key" style={{ fontWeight: '700', color: '#3730a3', fontSize: '12.5px', letterSpacing: '0.2px', paddingLeft: '8px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                            ▸ {row.key.replace(/_/g, " ").trim()}
-                                          </span>
-                                        </div>
-                                      );
-                                    }
-                                    let rowClass = "tech-row";
-                                    if (row.isDoubleIndented) {
-                                      rowClass += " tech-row-double-indented";
-                                    } else if (row.isIndented) {
-                                      rowClass += " tech-row-indented";
-                                    }
-                                    return (
-                                      <div key={i} className={rowClass}>
-                                        <span className="tech-key">{row.key.replace(/_/g, " ").trim()}</span>
-                                        <span className={`tech-value ${statusColor(row.value)}`}>
-                                          {row.value}
-                                        </span>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              </details>
+                            {msg.techDetails && msg.techDetails.length > 0 && (
+                              <button
+                                className="view-tech-details-btn"
+                                style={{ marginTop: '8px' }}
+                                onClick={() => {
+                                  const rawData = msg.rawJson || msg.apiDataRaw || null;
+                                  setUsageRawApiData(rawData);
+                                  setUsageApiType(msg.apiType || null);
+                                  if (window.innerWidth <= 768) {
+                                    setIsMobileUsageApiPanelOpen(true);
+                                  }
+                                }}
+                              >
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                  <polyline points="14 2 14 8 20 8" />
+                                  <line x1="16" y1="13" x2="8" y2="13" />
+                                  <line x1="16" y1="17" x2="8" y2="17" />
+                                </svg>
+                                {msg.apiType === "dashboard" && "Dashboard Summary"}
+                                {msg.apiType === "protocol" && "Protocol Usage"}
+                                {msg.apiType === "billing" && "Billing"}
+                                {msg.apiType === "api" && "API Response"}
+                                {!msg.apiType && "View Technical Details"}
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <polyline points="9 18 15 12 9 6" />
+                                </svg>
+                              </button>
                             )}
                           </div>
                         );

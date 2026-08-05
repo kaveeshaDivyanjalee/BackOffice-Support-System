@@ -114,8 +114,22 @@ def handle_main_agent_chat(request: MainAgentChatRequest):
             or str(n8n_data)
         )
 
+        # Extract exact tool called from n8n LangChain intermediateSteps if available
+        agent_used = None
+        if isinstance(n8n_data, dict):
+            steps = n8n_data.get("intermediateSteps") or n8n_data.get("intermediate_steps") or []
+            if isinstance(steps, list) and len(steps) > 0:
+                first_action = steps[0].get("action", {})
+                if isinstance(first_action, dict):
+                    agent_used = first_action.get("tool")
+            
+            # Also check if tool name is returned directly
+            if not agent_used:
+                agent_used = n8n_data.get("toolName") or n8n_data.get("tool")
+
         print(f"Main Agent reply: {str(reply)[:500]}")
-        return {"reply": reply, "raw": n8n_data}
+        print(f"Main Agent extracted tool: {agent_used}")
+        return {"reply": reply, "agent_used": agent_used, "raw": n8n_data}
 
     except requests.exceptions.ConnectionError:
         return {"error": f"Cannot connect to n8n at {N8N_WEBHOOK_URL}. Is n8n running?"}
