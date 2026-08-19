@@ -222,13 +222,13 @@ const REVERSE_AGENT_PATH_MAP = {
 // ═══════════════════════════════════════════════════════════════════════════
 function App() {
   const getInitialAgent = () => {
-    // On mobile, always default to Email Solution Agent regardless of URL
+    // On mobile, default to Main Agent
     if (window.innerWidth <= 768) {
-      return "Email Solution Agent";
+      return "Main Agent";
     }
     // On desktop, read from URL path as before
     const path = window.location.pathname.toLowerCase();
-    return AGENT_PATH_MAP[path] || "Email Solution Agent";
+    return AGENT_PATH_MAP[path] || "Main Agent";
   };
 
   const [selectedAgent, setSelectedAgent] = useState(getInitialAgent);
@@ -292,7 +292,7 @@ function App() {
   useEffect(() => {
     const handlePopState = () => {
       const path = window.location.pathname.toLowerCase();
-      const agent = AGENT_PATH_MAP[path] || "Email Solution Agent";
+      const agent = AGENT_PATH_MAP[path] || "Main Agent";
       setSelectedAgent(agent);
       setSubscriberId("");
 
