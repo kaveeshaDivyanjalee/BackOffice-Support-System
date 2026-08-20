@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+<<<<<<< HEAD
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 import requests
@@ -8,6 +9,11 @@ import os
 import re
 import urllib.request
 from jose import jwt, JWTError
+=======
+
+from app.config import CORS_ALLOW_ORIGINS
+from app.routers import config_agent, email_agent, main_agent, usage_agent
+>>>>>>> 6905a87 (refactor: restructure backend into modular app/ package)
 
 # Create app with CORS configuration
 app = FastAPI(title="Blitz.ai BackOffice Support System API")
@@ -15,6 +21,7 @@ app = FastAPI(title="Blitz.ai BackOffice Support System API")
 # Configure CORS with explicit parameters
 app.add_middleware(
     CORSMiddleware,
+<<<<<<< HEAD
     allow_origins=[
         "http://localhost:3000",
         "http://localhost:3001",
@@ -25,6 +32,9 @@ app.add_middleware(
         "*",
     ],
 
+=======
+    allow_origins=CORS_ALLOW_ORIGINS,
+>>>>>>> 6905a87 (refactor: restructure backend into modular app/ package)
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
@@ -32,6 +42,7 @@ app.add_middleware(
     max_age=3600,
 )
 
+<<<<<<< HEAD
 # ═════════════════════════════════════════════════════════════════════════════
 # Azure AD Authentication & Security Settings
 # ═════════════════════════════════════════════════════════════════════════════
@@ -136,18 +147,15 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
             headers={"WWW-Authenticate": "Bearer"}
         )
 
+=======
+>>>>>>> 6905a87 (refactor: restructure backend into modular app/ package)
 
 @app.get("/")
 def read_root():
     return {"message": "Backend API is running", "auth": "Microsoft Azure AD Enabled"}
 
-# N8N webhook URL - make it configurable via environment or use test mode
-N8N_WEBHOOK_URL = os.getenv(
-    "N8N_WEBHOOK_URL",
-    "https://sltrnddigitallab.app.n8n.cloud/webhook/e3713862-9787-49d5-b00d-445f1a17cdc6"
-)
-USE_TEST_MODE = os.getenv("USE_TEST_MODE", "false").lower() == "true"
 
+<<<<<<< HEAD
 # Usage Agent n8n webhook URL (local instance)
 USAGE_N8N_WEBHOOK_URL = os.getenv(
     "USAGE_N8N_WEBHOOK_URL",
@@ -439,3 +447,10 @@ def handle_support(query: SupportQuery, user_token: dict = Depends(verify_token)
             "message": str(e),
             "reply": "System temporarily unavailable"
         }
+=======
+# Register routers
+app.include_router(main_agent.router)
+app.include_router(usage_agent.router)
+app.include_router(config_agent.router)
+app.include_router(email_agent.router)
+>>>>>>> 6905a87 (refactor: restructure backend into modular app/ package)
