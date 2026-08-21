@@ -10,6 +10,8 @@ services:
       - "127.0.0.1:8085:8000"
     environment:
       - USE_TEST_MODE=false
+      - AZURE_CLIENT_ID=1be92fb6-e237-4bd6-ae1e-f2c4644d1766
+      - AZURE_TENANT_ID=534253fc-dfb6-462f-b5ca-cbe81939f5ee
     restart: unless-stopped
 
   frontend:

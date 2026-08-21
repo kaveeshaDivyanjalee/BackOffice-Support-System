@@ -1,4 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { useMsal, useIsAuthenticated } from "@azure/msal-react";
+import { loginRequest } from "./authConfig";
 import "./App.css";
 
 // ─── YAML-style text parser ────────────────────────────────────────────────
@@ -221,6 +223,48 @@ const REVERSE_AGENT_PATH_MAP = {
 
 // ═══════════════════════════════════════════════════════════════════════════
 function App() {
+  const { instance, accounts, inProgress } = useMsal();
+  const isAuthenticated = useIsAuthenticated();
+  const activeAccount = instance.getActiveAccount();
+  const userAccount = activeAccount || (accounts && accounts.length > 0 ? accounts[0] : null);
+  const isUserLoggedIn = isAuthenticated || (accounts && accounts.length > 0) || !!activeAccount;
+  const [loginError, setLoginError] = useState(null);
+
+  // Ensure active account is synced when accounts array updates
+  useEffect(() => {
+    if (accounts.length > 0 && !instance.getActiveAccount()) {
+      instance.setActiveAccount(accounts[0]);
+    }
+  }, [accounts, instance]);
+
+  const handleLogin = () => {
+    setLoginError(null);
+    instance.loginRedirect(loginRequest).catch((error) => {
+      console.error("Login redirect failed:", error);
+      setLoginError(error.message || "Login failed. Please try again.");
+    });
+  };
+
+  // Helper to acquire Microsoft Azure AD O365 JWT Token
+  const getAuthHeaders = useCallback(async () => {
+    const acc = instance.getActiveAccount() || (accounts && accounts.length > 0 ? accounts[0] : null);
+    if (!acc) return { "Content-Type": "application/json" };
+    try {
+      const response = await instance.acquireTokenSilent({
+        ...loginRequest,
+        account: acc,
+      });
+      const token = response.idToken || response.accessToken;
+      return {
+        "Content-Type": "application/json",
+        ...(token ? { "Authorization": `Bearer ${token}` } : {})
+      };
+    } catch (err) {
+      console.warn("Silent token acquisition failed:", err);
+      return { "Content-Type": "application/json" };
+    }
+  }, [instance, accounts]);
+
   const getInitialAgent = () => {
     // On mobile, default to Main Agent
     if (window.innerWidth <= 768) {
@@ -493,9 +537,10 @@ function App() {
     setMainLoading(true);
 
     try {
+      const authHeaders = await getAuthHeaders();
       const response = await fetch(getApiUrl("/main-agent-chat"), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders,
         body: JSON.stringify({
           message: userMsg,
           session_id: mainSessionId
@@ -603,9 +648,10 @@ function App() {
       setLoading(true);
 
       try {
+        const authHeaders = await getAuthHeaders();
         const response = await fetch(getApiUrl("/email-chat"), {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: authHeaders,
           body: JSON.stringify({
             message: userMsg,
             user_id: "020601",
@@ -646,9 +692,10 @@ function App() {
     setLoading(true);
 
     try {
+      const authHeaders = await getAuthHeaders();
       const response = await fetch(getApiUrl("/support-query"), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders,
         body: JSON.stringify({
           agent: selectedAgent,
           subscriber_id: subscriberId,
@@ -1347,9 +1394,10 @@ function App() {
     setUsageApiType(null);
 
     try {
+      const authHeaders = await getAuthHeaders();
       const response = await fetch(getApiUrl("/usage-chat"), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders,
         body: JSON.stringify({ query }),
       });
       const data = await response.json();
@@ -1432,6 +1480,76 @@ function App() {
   const isMainAgent = selectedAgent === "Main Agent";
   const showTechPanel = !isEmailAgentSelected && !isNonImplemented && !isUsageAgent && !isMainAgent && (apiData !== null || devOutput !== null || loading);
 
+  // ── Show Loading Screen while processing Microsoft redirect tokens ───────
+  if (inProgress === "handleRedirect" || inProgress === "login") {
+    return (
+      <div className="login-container">
+        <div className="login-card" style={{ padding: "48px 36px" }}>
+          <img src="/blitz-icon.png" alt="Blitz.ai" className="login-logo-icon" style={{ animation: "pulse 1.5s infinite" }} />
+          <h2 style={{ margin: "16px 0 8px", color: "var(--slt-dark)", fontSize: "20px" }}>Signing in to Blitz.ai...</h2>
+          <p style={{ color: "var(--text-muted)", fontSize: "13.5px", margin: 0 }}>Verifying your SLT Microsoft 365 credentials</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Render Microsoft O365 Login Screen if Unauthenticated ───────────────
+  if (!isUserLoggedIn) {
+    return (
+      <div className="login-container">
+        <div className="login-card">
+          <div className="login-brand">
+            <img src="/blitz-icon.png" alt="Blitz.ai" className="login-logo-icon" />
+            <h1 className="login-title">Blitz.ai</h1>
+            <span className="login-badge">Enterprise BackOffice</span>
+          </div>
+          <p className="login-subtitle">
+            Sri Lanka Telecom Digital Lab AI Support Platform
+          </p>
+          <div className="login-divider"></div>
+          <div className="login-features">
+            <div className="login-feature-item">
+              <span className="login-feature-icon">🛡️</span>
+              <div>
+                <strong>Single Sign-On (SSO)</strong>
+                <p>Sign in securely with your official SLT Microsoft 365 account.</p>
+              </div>
+            </div>
+            <div className="login-feature-item">
+              <span className="login-feature-icon">⚡</span>
+              <div>
+                <strong>Autonomous Multi-Agent AI</strong>
+                <p>Direct access to Router, Usage, Configuration & Email agents.</p>
+              </div>
+            </div>
+          </div>
+          {loginError && (
+            <div style={{ color: "#ef4444", background: "rgba(239, 68, 68, 0.1)", padding: "10px", borderRadius: "8px", fontSize: "12px", marginBottom: "16px" }}>
+              {loginError}
+            </div>
+          )}
+          <button
+            className="ms-login-button"
+            onClick={handleLogin}
+            disabled={inProgress === "login"}
+          >
+            <svg className="ms-icon" viewBox="0 0 21 21" width="20" height="20">
+              <rect x="1" y="1" width="9" height="9" fill="#f25022" />
+              <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+              <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
+              <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+            </svg>
+            <span>{inProgress === "login" ? "Signing In..." : "Sign in with Microsoft 365"}</span>
+          </button>
+          <div className="login-footer">
+            <span>🔒 Protected by Microsoft Azure Active Directory</span>
+            <small>Authorised SLT personnel only</small>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
       {/* Mobile overlay removed — dropdown overlay is rendered near the dropdown itself */}
@@ -1463,6 +1581,32 @@ function App() {
               {agent}
             </div>
           ))}
+
+          {/* ── User Profile & Sign Out ──────────────────────────────────── */}
+          <div className="sidebar-user-footer">
+            <div className="sidebar-user-avatar">
+              {userAccount?.name ? userAccount.name.charAt(0).toUpperCase() : "U"}
+            </div>
+            <div className="sidebar-user-info">
+              <span className="sidebar-user-name" title={userAccount?.name || "SLT User"}>
+                {userAccount?.name || "SLT User"}
+              </span>
+              <span className="sidebar-user-email" title={userAccount?.username || ""}>
+                {userAccount?.username || ""}
+              </span>
+            </div>
+            <button
+              className="sidebar-logout-btn"
+              title="Sign out of Microsoft 365"
+              onClick={() => instance.logoutRedirect()}
+            >
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                <polyline points="16 17 21 12 16 7"></polyline>
+                <line x1="21" y1="12" x2="9" y2="12"></line>
+              </svg>
+            </button>
+          </div>
         </div>
 
         {/* ── Chat Section ──────────────────────────────────────────────── */}
@@ -1534,7 +1678,6 @@ function App() {
                         </div>
                       )}
                       {usageMessages.map((msg, idx) => {
-                        const isLatestMessageAndAssistant = idx === usageMessages.length - 1 && msg.role === "assistant";
                         return (
                           <div key={idx} className={`usage-message ${msg.role === "user" ? "usage-msg-user" : "usage-msg-assistant"}`}>
                             <div className="usage-msg-bubble">
@@ -1819,8 +1962,6 @@ function App() {
                       </div>
                     ) : (
                       chatMessages.map((msg, index) => {
-                        const isLatestMessageAndAssistant = index === chatMessages.length - 1 && msg.role === "assistant";
-
                         if (isEmailAgentSelected) {
                           // Email Agent: Full-width rectangle card layout
                           const isUser = msg.role === "user";

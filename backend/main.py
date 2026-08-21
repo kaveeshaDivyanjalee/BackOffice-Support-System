@@ -1,13 +1,16 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 import requests
 import json
 import os
 import re
+import urllib.request
+from jose import jwt, JWTError
 
 # Create app with CORS configuration
-app = FastAPI()
+app = FastAPI(title="Blitz.ai BackOffice Support System API")
 
 # Configure CORS with explicit parameters
 app.add_middleware(
@@ -26,9 +29,113 @@ app.add_middleware(
     max_age=3600,
 )
 
+# ═════════════════════════════════════════════════════════════════════════════
+# Azure AD Authentication & Security Settings
+# ═════════════════════════════════════════════════════════════════════════════
+AZURE_TENANT_ID = os.getenv("AZURE_TENANT_ID", "534253fc-dfb6-462f-b5ca-cbe81939f5ee")
+AZURE_CLIENT_ID = os.getenv("AZURE_CLIENT_ID", "1be92fb6-e237-4bd6-ae1e-f2c4644d1766")
+JWKS_URL = f"https://login.microsoftonline.com/{AZURE_TENANT_ID}/discovery/v2.0/keys"
+
+security = HTTPBearer(auto_error=False)
+_jwks_cache = None
+
+def get_jwks():
+    global _jwks_cache
+    if _jwks_cache is None:
+        try:
+            req = urllib.request.Request(JWKS_URL, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                _jwks_cache = json.loads(resp.read().decode())
+        except Exception as e:
+            print(f"Error fetching Azure AD JWKS keys from {JWKS_URL}: {e}")
+    return _jwks_cache
+
+def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """
+    Validates the Microsoft Azure AD O365 JWT Bearer token on incoming API requests.
+    """
+    # Allow bypassing authentication if AUTH_DISABLED=true (e.g. for isolated internal tests)
+    if os.getenv("AUTH_DISABLED", "false").lower() == "true":
+        return {"preferred_username": "dev@slt.lk", "name": "Developer (Auth Disabled)"}
+
+    if not credentials or not credentials.credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required. Please sign in with your SLT Microsoft account.",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+
+    token = credentials.credentials
+    try:
+        unverified_header = jwt.get_unverified_header(token)
+        kid = unverified_header.get("kid")
+        if not kid:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token: missing 'kid' in header."
+            )
+
+        jwks = get_jwks()
+        if not jwks:
+            global _jwks_cache
+            _jwks_cache = None
+            jwks = get_jwks()
+
+        key = None
+        for k in (jwks or {}).get("keys", []):
+            if k.get("kid") == kid:
+                key = k
+                break
+
+        if not key:
+            # Refresh cache once in case keys rotated
+            _jwks_cache = None
+            jwks = get_jwks()
+            for k in (jwks or {}).get("keys", []):
+                if k.get("kid") == kid:
+                    key = k
+                    break
+
+        if not key:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token: unknown signing key."
+            )
+
+        # Decode token with RSA256 signature and expiration verification
+        payload = jwt.decode(
+            token,
+            key,
+            algorithms=["RS256"],
+            options={
+                "verify_aud": False,
+                "verify_signature": True,
+                "verify_exp": True
+            }
+        )
+
+        user_email = payload.get("preferred_username") or payload.get("email") or payload.get("upn")
+        print(f"Authenticated user: {user_email}")
+        return payload
+
+    except JWTError as e:
+        print(f"JWT Validation failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid or expired token: {str(e)}",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+    except Exception as e:
+        print(f"Authentication exception: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token validation failed.",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+
 @app.get("/")
 def read_root():
-    return {"message": "Backend API is running"}
+    return {"message": "Backend API is running", "auth": "Microsoft Azure AD Enabled"}
 
 # N8N webhook URL - make it configurable via environment or use test mode
 N8N_WEBHOOK_URL = os.getenv(
@@ -68,9 +175,9 @@ class MainAgentChatRequest(BaseModel):
     session_id: str = "default_main_session"
 
 @app.post("/main-agent-chat")
-def handle_main_agent_chat(request: MainAgentChatRequest):
+def handle_main_agent_chat(request: MainAgentChatRequest, user_token: dict = Depends(verify_token)):
     try:
-        print(f"Main Agent request: {request.model_dump()}")
+        print(f"Main Agent request: {request.model_dump()} (User: {user_token.get('preferred_username', 'Unknown')})")
         print(f"Main Agent N8N URL: {N8N_WEBHOOK_URL}")
 
         payload = {
@@ -106,7 +213,6 @@ def handle_main_agent_chat(request: MainAgentChatRequest):
             n8n_data = n8n_data[0] if len(n8n_data) > 0 else {}
 
         # Extract the reply text from the n8n Respond to Webhook output
-        # The Main Agent uses "respondWith: allIncomingItems", so output key is "output"
         reply = (
             n8n_data.get("output")
             or n8n_data.get("reply")
@@ -140,9 +246,9 @@ def handle_main_agent_chat(request: MainAgentChatRequest):
         return {"error": str(e)}
 
 @app.post("/email-chat")
-def handle_email_chat(request: EmailChatRequest):
+def handle_email_chat(request: EmailChatRequest, user_token: dict = Depends(verify_token)):
     try:
-        print(f"Email agent request: {request.model_dump()}")
+        print(f"Email agent request: {request.model_dump()} (User: {user_token.get('preferred_username', 'Unknown')})")
         url = "https://aiagents.sltdigitallab.lk/api/v1/chat"
         payload = {
             "message": request.message,
@@ -159,9 +265,9 @@ def handle_email_chat(request: EmailChatRequest):
         return {"error": str(e)}
 
 @app.post("/usage-chat")
-def handle_usage_chat(request: UsageChatRequest):
+def handle_usage_chat(request: UsageChatRequest, user_token: dict = Depends(verify_token)):
     try:
-        print(f"Usage agent request: {request.model_dump()}")
+        print(f"Usage agent request: {request.model_dump()} (User: {user_token.get('preferred_username', 'Unknown')})")
         print(f"Usage N8N URL: {USAGE_N8N_WEBHOOK_URL}")
 
         response = requests.post(
@@ -195,11 +301,10 @@ def handle_usage_chat(request: UsageChatRequest):
         print(f"Usage agent error: {str(e)}")
         return {"error": str(e)}
 
-
 @app.post("/support-query")
-def handle_support(query: SupportQuery):
+def handle_support(query: SupportQuery, user_token: dict = Depends(verify_token)):
     try:
-        print(f"Frontend request: {query.model_dump()}")
+        print(f"Frontend request: {query.model_dump()} (User: {user_token.get('preferred_username', 'Unknown')})")
         print(f"N8N URL: {CONFIG_N8N_WEBHOOK_URL}")
         print(f"Test mode: {USE_TEST_MODE}")
         
