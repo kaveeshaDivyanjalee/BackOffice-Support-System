@@ -2,10 +2,15 @@
  * Microsoft Azure Active Directory (MSAL) Configuration for Blitz.ai
  */
 
-// Dynamically match exact Azure Portal redirect URIs with trailing slash
+// Dynamically matches exact Azure Portal redirect URIs for both environments
 const getRedirectUri = () => {
   const origin = window.location.origin;
-  return origin.endsWith('/') ? origin : `${origin}/`;
+  // Production Azure entry MUST have trailing slash: https://backofficeagent.sltdigitallab.lk/
+  if (origin.includes("backofficeagent.sltdigitallab.lk")) {
+    return origin.endsWith('/') ? origin : `${origin}/`;
+  }
+  // Localhost Azure entry has no trailing slash: http://localhost:3000
+  return origin.replace(/\/$/, "");
 };
 
 export const msalConfig = {
@@ -18,7 +23,7 @@ export const msalConfig = {
   },
   cache: {
     cacheLocation: "localStorage",
-    storeAuthStateInCookie: false,
+    storeAuthStateInCookie: true, // Enables cookie storage for reliable local dev authentication
   },
 };
 
@@ -26,3 +31,4 @@ export const msalConfig = {
 export const loginRequest = {
   scopes: ["User.Read", "openid", "profile", "email"],
 };
+
