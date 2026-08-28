@@ -5,12 +5,16 @@
 // Dynamically matches exact Azure Portal redirect URIs for both environments
 const getRedirectUri = () => {
   const origin = window.location.origin;
-  // Production Azure entry MUST have trailing slash: https://backofficeagent.sltdigitallab.lk/
+  let uri;
+  // Production Azure entry has trailing slash: https://backofficeagent.sltdigitallab.lk/
   if (origin.includes("backofficeagent.sltdigitallab.lk")) {
-    return origin.endsWith('/') ? origin : `${origin}/`;
+    uri = origin.endsWith('/') ? origin : `${origin}/`;
+  } else {
+    // Localhost with explicit /auth path: http://localhost:3000/auth
+    uri = `${origin.replace(/\/$/, "")}/auth`;
   }
-  // Localhost Azure entry has no trailing slash: http://localhost:3000
-  return origin.replace(/\/$/, "");
+  console.log("🔒 [MSAL Config] getRedirectUri():", uri);
+  return uri;
 };
 
 export const msalConfig = {
@@ -23,7 +27,7 @@ export const msalConfig = {
   },
   cache: {
     cacheLocation: "localStorage",
-    storeAuthStateInCookie: true, // Enables cookie storage for reliable local dev authentication
+    storeAuthStateInCookie: true,
   },
 };
 
@@ -31,4 +35,3 @@ export const msalConfig = {
 export const loginRequest = {
   scopes: ["User.Read", "openid", "profile", "email"],
 };
-

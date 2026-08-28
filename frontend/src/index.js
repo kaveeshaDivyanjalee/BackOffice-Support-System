@@ -8,6 +8,8 @@ import { MsalProvider } from '@azure/msal-react';
 import { msalConfig } from './authConfig';
 
 const msalInstance = new PublicClientApplication(msalConfig);
+window.msalInstance = msalInstance;
+
 
 // Initialize MSAL and process any incoming redirect authentication code
 msalInstance.initialize()
@@ -22,20 +24,23 @@ msalInstance.initialize()
       }
     }
 
-    // Clean up stale URL hash after processing
+    // Clean up hash and reset /auth path back to root / after processing
     if (window.location.hash && (window.location.hash.includes("code=") || window.location.hash.includes("error="))) {
-      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      window.history.replaceState(null, "", window.location.pathname === "/auth" ? "/" : window.location.pathname);
+    } else if (window.location.pathname === "/auth") {
+      window.history.replaceState(null, "", "/");
     }
   })
   .catch((error) => {
     console.warn("MSAL redirect promise note:", error);
-    // Remove invalid/expired hash from address bar
     if (window.location.hash && (window.location.hash.includes("code=") || window.location.hash.includes("error="))) {
-      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      window.history.replaceState(null, "", window.location.pathname === "/auth" ? "/" : window.location.pathname);
+    } else if (window.location.pathname === "/auth") {
+      window.history.replaceState(null, "", "/");
     }
   })
+
   .finally(() => {
-    // Add event callback for successful logins
     msalInstance.addEventCallback((event) => {
       if (event.eventType === EventType.LOGIN_SUCCESS && event.payload?.account) {
         msalInstance.setActiveAccount(event.payload.account);
@@ -51,5 +56,7 @@ msalInstance.initialize()
       </React.StrictMode>
     );
   });
+
+
 
 reportWebVitals();

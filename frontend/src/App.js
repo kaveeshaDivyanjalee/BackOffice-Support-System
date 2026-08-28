@@ -245,6 +245,9 @@ function App() {
     });
   };
 
+
+
+
   // Helper to acquire Microsoft Azure AD O365 JWT Token
   const getAuthHeaders = useCallback(async () => {
     const acc = instance.getActiveAccount() || (accounts && accounts.length > 0 ? accounts[0] : null);
