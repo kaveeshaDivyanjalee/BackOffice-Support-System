@@ -245,8 +245,72 @@ function App() {
     });
   };
 
+  // 1-Click automated sign out & re-login handler for expired sessions
+  const handleReLogin = () => {
+    try {
+      localStorage.clear();
+      sessionStorage.clear();
+    } catch (e) {
+      console.warn("Storage clear warning:", e);
+    }
+    instance.loginRedirect({
+      ...loginRequest,
+      prompt: "select_account",
+    }).catch((error) => {
+      console.error("Re-login redirect failed:", error);
+    });
+  };
 
-
+  // Render a beautiful interactive Session Expired card with a 1-click Sign In button
+  const renderSessionExpiredCard = () => (
+    <div className="session-expired-card" style={{
+      padding: '16px 20px',
+      background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.04) 0%, rgba(244, 63, 94, 0.08) 100%)',
+      border: '1px solid rgba(239, 68, 68, 0.25)',
+      borderRadius: '12px',
+      marginTop: '6px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '12px'
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#b91c1c', fontWeight: '600', fontSize: '0.95rem' }}>
+        <span style={{ fontSize: '1.25rem' }}>🔒</span>
+        <span>Session Expired</span>
+      </div>
+      <p style={{ margin: 0, color: '#4b5563', fontSize: '0.88rem', lineHeight: '1.5' }}>
+        Your Microsoft 365 login session has timed out for security. Please sign in again to continue your conversation.
+      </p>
+      <button
+        onClick={handleReLogin}
+        style={{
+          alignSelf: 'flex-start',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '8px',
+          backgroundColor: '#0078d4',
+          color: '#ffffff',
+          border: 'none',
+          borderRadius: '8px',
+          padding: '9px 18px',
+          fontSize: '0.88rem',
+          fontWeight: '600',
+          cursor: 'pointer',
+          boxShadow: '0 2px 4px rgba(0, 120, 212, 0.25)',
+          transition: 'background-color 0.2s, transform 0.1s'
+        }}
+        onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#106ebe'}
+        onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#0078d4'}
+      >
+        <svg viewBox="0 0 21 21" width="16" height="16">
+          <rect x="1" y="1" width="9" height="9" fill="#f25022" />
+          <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+          <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
+          <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+        </svg>
+        Sign In with Microsoft 365
+      </button>
+    </div>
+  );
 
   // Helper to acquire Microsoft Azure AD O365 JWT Token
   const getAuthHeaders = useCallback(async () => {
@@ -267,6 +331,7 @@ function App() {
       return { "Content-Type": "application/json" };
     }
   }, [instance, accounts]);
+
 
   const getInitialAgent = () => {
     // On mobile, default to Main Agent
@@ -550,7 +615,16 @@ function App() {
         }),
       });
 
+      if (response.status === 401) {
+        setMainMessages(prev => [
+          ...prev,
+          { role: "assistant", isSessionExpired: true, content: "Session Expired", workflow: [] }
+        ]);
+        return;
+      }
+
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
 
       const data = await response.json();
       if (data.error) throw new Error(data.error);
@@ -662,6 +736,16 @@ function App() {
           }),
         });
 
+        if (response.status === 401) {
+          appendMessage(selectedAgent, {
+            role: "assistant",
+            isSessionExpired: true,
+            content: "Session Expired",
+            isEmailAgent: true
+          });
+          return;
+        }
+
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
         const data = await response.json();
@@ -706,7 +790,20 @@ function App() {
         }),
       });
 
+      if (response.status === 401) {
+        appendMessage(selectedAgent, {
+          role: "assistant",
+          isSessionExpired: true,
+          content: "Session Expired",
+          workflow: []
+        });
+        setSubscriberId("");
+        setLoading(false);
+        return;
+      }
+
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
 
       const data = await response.json();
       console.log("Full backend response:", JSON.stringify(data, null, 2));
@@ -1206,10 +1303,15 @@ function App() {
 
 
   const renderMessageContent = (msg) => {
-    if (!msg || !msg.content) return null;
+    if (!msg) return null;
+    if (msg.isSessionExpired) {
+      return renderSessionExpiredCard();
+    }
+    if (!msg.content) return null;
 
     // Fix literal \n escape sequences that backend sometimes sends as text
     let content = msg.content.replace(/\\n/g, "\n");
+
 
     // Check if content contains markdown table syntax (|) or headings (#)
     if (content.includes("|") || /^\s*#{1,6}\s+/m.test(content)) {
@@ -1403,6 +1505,15 @@ function App() {
         headers: authHeaders,
         body: JSON.stringify({ query }),
       });
+
+      if (response.status === 401) {
+        setUsageMessages(prev => [
+          ...prev,
+          { role: "assistant", isSessionExpired: true, content: "Session Expired" }
+        ]);
+        return;
+      }
+
       const data = await response.json();
 
       if (data.error) {
@@ -1687,9 +1798,11 @@ function App() {
                               {msg.role === "assistant" && (
                                 <div className="usage-msg-avatar">🤖</div>
                               )}
-                              {msg.role === "user"
-                                ? <p className="usage-md-p">{msg.content}</p>
-                                : renderMarkdown(msg.content)
+                              {msg.isSessionExpired
+                                ? renderSessionExpiredCard()
+                                : msg.role === "user"
+                                  ? <p className="usage-md-p">{msg.content}</p>
+                                  : renderMarkdown(msg.content)
                               }
                             </div>
                             {msg.techDetails && msg.techDetails.length > 0 && (

@@ -122,19 +122,20 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
         return payload
 
     except JWTError as e:
-        print(f"JWT Validation failed: {e}")
+        print(f"❌ JWT Validation failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Invalid or expired token: {str(e)}",
             headers={"WWW-Authenticate": "Bearer"}
         )
     except Exception as e:
-        print(f"Authentication exception: {e}")
+        print(f"❌ Authentication exception: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token validation failed.",
+            detail=f"Token validation failed: {str(e)}",
             headers={"WWW-Authenticate": "Bearer"}
         )
+
 
 @app.get("/")
 def read_root():
