@@ -9,10 +9,10 @@ N8N_WEBHOOK_URL = os.getenv(
     "https://sltrnddigitallab.app.n8n.cloud/webhook/e3713862-9787-49d5-b00d-445f1a17cdc6"
 )
 
-# Test mode toggle (used by the Config/Support agent)
+# Test mode toggle (Default False for Production)
 USE_TEST_MODE = os.getenv("USE_TEST_MODE", "false").lower() == "true"
 
-# Usage Agent n8n webhook URL (local instance)
+# Usage Agent n8n webhook URL
 USAGE_N8N_WEBHOOK_URL = os.getenv(
     "USAGE_N8N_WEBHOOK_URL",
     "https://sltrnddigitallab.app.n8n.cloud/webhook/891a401b-46cf-4c67-b3d6-f0eb128bbee7"

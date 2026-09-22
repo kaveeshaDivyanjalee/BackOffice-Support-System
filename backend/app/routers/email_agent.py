@@ -1,13 +1,10 @@
-"""
-Router for the Email Agent chat endpoint (/email-chat).
-"""
+import json
+import re
 from fastapi import APIRouter
-
 from app.models import EmailChatRequest
 from app.services.email_client import call_email_agent
 
 router = APIRouter()
-
 
 @router.post("/email-chat")
 def handle_email_chat(request: EmailChatRequest):
@@ -20,8 +17,48 @@ def handle_email_chat(request: EmailChatRequest):
             timeout=60
         )
         response.raise_for_status()
-        print(f"Email agent response: {response.text}")
-        return {"reply": response.text}
+
+        reply_text = ""
+
+        # 1. Standard JSON format එකක්දැයි පරීක්ෂා කිරීම
+        try:
+            res_data = response.json()
+            if isinstance(res_data, dict):
+                reply_text = res_data.get("response") or res_data.get("output") or res_data.get("reply") or ""
+        except Exception:
+            pass
+
+        # 2. JSON නොවේ නම් (SSE / Raw Text chunked response එකක් නම්) Clean කර ගැනීම
+        if not reply_text:
+            raw_text = response.text
+            
+            # SSE stream chunks (e.g. 'data: {"response": "..."}' or 'data: Hello') parse කිරීම
+            extracted_chunks = []
+            for line in raw_text.splitlines():
+                line = line.strip()
+                if line.startswith("data:"):
+                    content = line[5:].strip()
+                    try:
+                        # Chunk එක JSON එකක් නම් text එක extract කිරීම
+                        json_chunk = json.loads(content)
+                        if isinstance(json_chunk, dict):
+                            extracted_chunks.append(json_chunk.get("response") or json_chunk.get("text") or "")
+                        else:
+                            extracted_chunks.append(str(json_chunk))
+                    except Exception:
+                        extracted_chunks.append(content)
+
+            if extracted_chunks:
+                reply_text = " ".join(chunk for chunk in extracted_chunks if chunk)
+            else:
+                reply_text = raw_text
+
+        # 3. Text එකේ Spaces අමුතුවෙන් එකතු වී/හැලී ඇත්නම් Normal formatting කිරීම
+        reply_text = re.sub(r'\s+', ' ', reply_text).strip()
+
+        print(f"Email agent response: {reply_text}")
+        return {"reply": reply_text}
+
     except Exception as e:
         print(f"Email agent error: {str(e)}")
         return {"error": str(e)}
