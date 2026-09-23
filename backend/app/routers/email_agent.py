@@ -31,7 +31,7 @@ def handle_email_chat(request: EmailChatRequest):
         # 2. JSON නොවේ නම් (SSE / Raw Text chunked response එකක් නම්) Clean කර ගැනීම
         if not reply_text:
             raw_text = response.text
-            
+
             # SSE stream chunks (e.g. 'data: {"response": "..."}' or 'data: Hello') parse කිරීම
             extracted_chunks = []
             for line in raw_text.splitlines():
@@ -53,8 +53,12 @@ def handle_email_chat(request: EmailChatRequest):
             else:
                 reply_text = raw_text
 
-        # 3. Text එකේ Spaces අමුතුවෙන් එකතු වී/හැලී ඇත්නම් Normal formatting කිරීම
-        reply_text = re.sub(r'\s+', ' ', reply_text).strip()
+        # 3. Line breaks preserve කරලා, horizontal whitespace (spaces/tabs) විතරක් clean කිරීම
+        #    (පරණ පේළිය: re.sub(r'\s+', ' ', reply_text) — meka \n okkoma iwath karagatta, ee nisa
+        #    bullet points / line breaks nathi wela "one big blob" widihata output eka aawa)
+        reply_text = re.sub(r'[ \t]+', ' ', reply_text)      # multiple spaces/tabs -> single space
+        reply_text = re.sub(r'\n{3,}', '\n\n', reply_text)   # 3+ consecutive newlines -> max 2
+        reply_text = reply_text.strip()
 
         print(f"Email agent response: {reply_text}")
         return {"reply": reply_text}

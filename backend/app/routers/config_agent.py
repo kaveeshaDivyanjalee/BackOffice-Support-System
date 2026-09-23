@@ -2,6 +2,7 @@
 Router for the Configuration / Support Agent endpoint (/support-query).
 """
 import json
+import re
 
 import requests
 from fastapi import APIRouter
@@ -11,6 +12,63 @@ from app.models import SupportQuery
 from app.services.n8n_client import call_webhook, unwrap_list_response
 
 router = APIRouter()
+
+
+def _extract_clean_summary(raw_summary):
+    """
+    ai_analysis.customer_output.summary eka double-encoded JSON string ekak
+    widihata enawanam (n8n Code node eke JSON.stringify() dewenak karala),
+    eken thiyena real 'summary' text eka extract karagannawa.
+    Normal plain text ekak nam, ehemama return karanawa.
+    """
+    if not isinstance(raw_summary, str):
+        return raw_summary
+
+    text = raw_summary.strip()
+
+    # Double/triple-encoded JSON widihata pennenawada balanawa (e.g. starts with '{' and has \" escapes)
+    if text.startswith("{") and '\\"' in text:
+        try:
+            # Escape backslash-quotes ain karala, real JSON widihata parse karanna try karanawa
+            # Nested/malformed unath, regex ekakin 'summary' field eka pluck karagannawa
+            match = re.search(r'"summary"\s*:\s*"([^"]+?)"\s*[,}]', text)
+            if match:
+                return match.group(1).strip()
+
+            # Fallback: try direct JSON parse (single-encoded nam meka work karayi)
+            parsed = json.loads(text)
+            if isinstance(parsed, dict):
+                inner = parsed.get("customer_output", {}).get("summary")
+                if inner:
+                    return inner
+        except Exception:
+            pass
+
+    return text
+
+
+def _clean_workflow_execution(steps):
+    """
+    developer_output.workflow_execution eke thiyena malformed/broken JSON
+    fragment strings, readable widihata clean karanawa. Parse karanna
+    behe unath, raw text eka witharak return karanawa (crash wenne na).
+    """
+    if not isinstance(steps, list):
+        return steps
+
+    cleaned = []
+    for step in steps:
+        if isinstance(step, str):
+            # Escaped quotes saha extra JSON syntax ain karala readable karanawa
+            s = step.replace('\\"', '"').replace('\\n', ' ')
+            s = re.sub(r'[{}\[\]=]', '', s)
+            s = re.sub(r'"execution_trace"\s*:?\s*', '', s)
+            s = re.sub(r'\s+', ' ', s).strip(' ",')
+            if s:
+                cleaned.append(s)
+        else:
+            cleaned.append(step)
+    return cleaned
 
 
 @router.post("/support-query")
@@ -76,11 +134,9 @@ def handle_support(query: SupportQuery):
             }
 
         # ── Unwrap N8N array responses ─────────────────────────────────
-        # N8N often returns [{...}] or [{"output": "..."}]
         if isinstance(n8n_response, list):
             if len(n8n_response) > 0:
                 first = n8n_response[0]
-                # If item has 'output' key pass it through for frontend parsing
                 if "output" in first:
                     n8n_response = {"output": first["output"]}
                 else:
@@ -89,15 +145,32 @@ def handle_support(query: SupportQuery):
                 n8n_response = {"status": "empty", "message": "N8N returned empty array"}
 
         # ── Normalize ai_analysis string → keep as-is for frontend parser ─
-        # The frontend's parseAITextOutput() handles the YAML-style text.
-        # Only attempt JSON parsing here; leave plain text untouched.
         ai_raw = n8n_response.get("ai_analysis")
         if isinstance(ai_raw, str):
             try:
                 n8n_response["ai_analysis"] = json.loads(ai_raw)
             except json.JSONDecodeError:
-                # Leave as plain text string — frontend will parse it
                 pass
+
+        # ── NEW: Clean double-encoded customer_output.summary ──────────
+        ai_analysis = n8n_response.get("ai_analysis")
+        if isinstance(ai_analysis, dict):
+            customer_output = ai_analysis.get("customer_output")
+            if isinstance(customer_output, dict) and "summary" in customer_output:
+                customer_output["summary"] = _extract_clean_summary(customer_output["summary"])
+
+            # ── NEW: Clean malformed workflow_execution steps ──────────
+            developer_output = ai_analysis.get("developer_output")
+            if isinstance(developer_output, dict) and "workflow_execution" in developer_output:
+                developer_output["workflow_execution"] = _clean_workflow_execution(
+                    developer_output["workflow_execution"]
+                )
+
+        # ── NEW: If backend API call itself failed (ECONNREFUSED etc), flag it ──
+        api_data = n8n_response.get("api_data")
+        if isinstance(api_data, dict) and isinstance(api_data.get("error"), dict):
+            n8n_response["backend_api_status"] = "unreachable"
+            n8n_response["backend_api_error_code"] = api_data["error"].get("code", "UNKNOWN")
 
         print(f"N8N response (normalised): {json.dumps(n8n_response, indent=2)}")
 
@@ -128,7 +201,7 @@ def handle_support(query: SupportQuery):
             "message": "N8N returned invalid JSON",
             "reply": "The N8N workflow did not return valid data. Check N8N logs.",
             "debug": str(json_error),
-            "raw_response": response.text[:500] if response is not None else ""  # First 500 chars of response
+            "raw_response": response.text[:500] if response is not None else ""
         }
     except requests.exceptions.RequestException as req_error:
         print(f"Request error: {str(req_error)}")
