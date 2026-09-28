@@ -5,3 +5,7 @@ pydantic>=2.0.0
 python-jose[cryptography]>=3.3.0
 cryptography>=41.0.0
 httpx>=0.24.0
+sqlalchemy
+psycopg2-binary
+pandas
+openpyxl
