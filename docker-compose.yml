@@ -1,4 +1,19 @@
+version: '3.8'
+
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: backoffice_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-YOUR_STRONG_PASSWORD}
+      POSTGRES_DB: ${DB_NAME:-slt_db}
+    ports:
+      - "5432:5432"  # n8n Cloud එකට connect වෙන්න Port එක expose කර ඇත
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
   backend:
     build: 
       context: ./backend
@@ -10,6 +25,9 @@ services:
       - USE_TEST_MODE=false
       - AZURE_CLIENT_ID=1be92fb6-e237-4bd6-ae1e-f2c4644d1766
       - AZURE_TENANT_ID=534253fc-dfb6-462f-b5ca-cbe81939f5ee
+      - DATABASE_URL=postgresql+psycopg2://${DB_USER:-postgres}:${DB_PASSWORD:-YOUR_STRONG_PASSWORD}@db:5432/${DB_NAME:-slt_db}
+    depends_on:
+      - db
     restart: unless-stopped
 
   frontend:
@@ -27,12 +45,13 @@ services:
     image: prom/node-exporter:latest
     container_name: backoffice_node_exporter
     command:
-      - '--path.rootfs=/host'
       - '--path.procfs=/host/proc'
       - '--path.sysfs=/host/sys'
-      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
     ports:
       - "9100:9100"
     volumes:
-      - /:/host:ro,rslave
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
     restart: always
+volumes:
+  postgres_data:

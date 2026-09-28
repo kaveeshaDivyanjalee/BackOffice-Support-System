@@ -54,11 +54,31 @@ def handle_email_chat(request: EmailChatRequest):
                 reply_text = raw_text
 
         # 3. Line breaks preserve කරලා, horizontal whitespace (spaces/tabs) විතරක් clean කිරීම
-        #    (පරණ පේළිය: re.sub(r'\s+', ' ', reply_text) — meka \n okkoma iwath karagatta, ee nisa
-        #    bullet points / line breaks nathi wela "one big blob" widihata output eka aawa)
         reply_text = re.sub(r'[ \t]+', ' ', reply_text)      # multiple spaces/tabs -> single space
         reply_text = re.sub(r'\n{3,}', '\n\n', reply_text)   # 3+ consecutive newlines -> max 2
         reply_text = reply_text.strip()
+
+        # 4. Strict Infrastructure / DevOps Query Guardrail Interceptor
+        user_msg_lower = request.message.lower()
+
+        # Userගේ ප්‍රශ්නයේ Infrastructure/DevOps technical terms තියෙනවාදැයි පරීක්ෂා කිරීම පමණක් සිදු කරයි
+        infra_patterns = [
+            r"frontend service", r"backend service", r"container name", r"internal port",
+            r"health endpoint", r"health url", r"database service", r"database exporter",
+            r"database name", r"prometheus", r"chroma", r"n/a because it does not exist",
+            r"\bport\b", r"\bhost\b", r"\bcontainer\b", r"\bexporter\b"
+        ]
+
+        is_infra_query = any(re.search(pattern, user_msg_lower) for pattern in infra_patterns)
+
+        if is_infra_query:
+            reply_text = (
+                "I'm here to assist with customer support inquiries related to SLT services. "
+                "For technical details such as service names, container names, ports, databases, or "
+                "infrastructure configurations, I recommend reaching out to your network administrator "
+                "or referring to your company's technical documentation. If you have any issues related "
+                "to email services, feel free to let me know!"
+            )
 
         print(f"Email agent response: {reply_text}")
         return {"reply": reply_text}
