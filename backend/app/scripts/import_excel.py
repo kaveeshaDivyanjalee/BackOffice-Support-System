@@ -3,9 +3,9 @@ import openpyxl
 from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
 
-# Database Models auto-create කරගැනීමට backend app එකෙන් Base import කිරීම
+# Database Models auto-create කරගැනීමට Base import කිරීම
 try:
-    from app.db.database import Base  # හෝ models තියෙන path එක අනුව
+    from app.models import Base
 except ImportError:
     Base = None
 
@@ -24,10 +24,12 @@ def import_with_openpyxl(excel_path):
         print(f"Connecting to PostgreSQL at {DB_HOST}:{DB_PORT} using psycopg2...")
         engine = create_engine(DATABASE_URL)
 
-        # 1. FastAPI models හරහා Tables auto-create කිරීම (Table එක නැත්නම්)
+        # 1. Table එක DB එකේ නැත්නම් auto-create කිරීම
         if Base is not None:
             print("Creating tables if they don't exist...")
             Base.metadata.create_all(bind=engine)
+        else:
+            print("⚠️ Base model was not imported. Skipping table creation.")
 
         print(f"Loading workbook: {excel_path}...")
         wb = openpyxl.load_workbook(excel_path, data_only=True)
@@ -49,7 +51,9 @@ def import_with_openpyxl(excel_path):
 
         columns_str = ", ".join(headers)
         placeholders_str = ", ".join([f":{col}" for col in headers])
-        query = text(f"INSERT INTO customer_status ({columns_str}) VALUES ({placeholders_str})")
+        
+        # PostgreSQL ON CONFLICT (Duplicate Entry නොවී update වීම සඳහා)
+        query = text(f"INSERT INTO customer_status ({columns_str}) VALUES ({placeholders_str}) ON CONFLICT (customer_id) DO NOTHING")
 
         with engine.begin() as conn:
             for row in rows_to_insert:
